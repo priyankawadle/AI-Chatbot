@@ -1,0 +1,79 @@
+# --- General ---
+__pycache__/
+*.py[cod]
+*.log
+*.tmp
+*.swp
+*.bak
+*.old
+.DS_Store
+Thumbs.db
+
+# --- Environments & dependencies ---
+.env
+.env.*
+.venv/
+venv/
+*.egg-info/
+pip-wheel-metadata/
+poetry.lock
+Pipfile.lock
+node_modules/
+
+# --- Python build artifacts ---
+build/
+dist/
+*.egg
+.eggs/
+.coverage
+htmlcov/
+pytest_cache/
+
+# --- Streamlit specific ---
+.streamlit/
+.streamlit-app/.streamlit/
+
+# --- FastAPI / Backend specific ---
+apps/backend/.mypy_cache/
+apps/backend/__pycache__/
+apps/backend/app/__pycache__/
+
+# --- Docker ---
+**/Dockerfile.*
+**/Dockerfile
+docker-compose.override.yml
+*.pid
+*.sock
+
+# --- IDEs & Editors ---
+.vscode/
+.idea/
+*.code-workspace
+*.sublime-project
+*.sublime-workspace
+
+# --- System files ---
+desktop.ini
+$RECYCLE.BIN/
+
+# --- Data / Model / Cache ---
+data/
+models/artifacts/
+models/training/notebooks/.ipynb_checkpoints/
+*.db
+*.sqlite3
+*.csv
+*.jsonl
+*.parquet
+
+# --- Test & Coverage ---
+.coverage
+.tox/
+.nox/
+pytest_cache/
+tests/__pycache__/
+
+# --- Others ---
+logs/
+uploads/
+outputs/
