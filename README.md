@@ -272,3 +272,35 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 $env:DATABASE_URL = "sqlite:///./local.db"
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reloa
 -->
+
+
+<!-- 
+Start Postgres docker
+cd AI-Customer-Support-Chatbot
+docker ps -a
+docker rm some-postgres
+docker run -d --name some-postgres `
+  -e POSTGRES_PASSWORD=mysecretpassword `
+  -e POSTGRES_USER=postgres `
+  -e POSTGRES_DB=postgres `
+  -p 5432:5432 `
+  -v pg_data:/var/lib/postgresql/data `
+  postgres:16 -->
+
+<!-- 
+START QDRANT
+docker run -p 6333:6333 qdrant/qdrant -->
+
+<!--
+BACKEND START
+cd apps/backend     
+.venv\Scripts\activate        
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload -->
+
+
+<!--
+FRONTEND START
+cd apps/streamlit-app  
+.venv\Scripts\activate 
+streamlit run streamlit_app.py   -->
+

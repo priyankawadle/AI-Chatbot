@@ -2,14 +2,20 @@ import os
 import secrets
 import hashlib
 import hmac
-from typing import Generator, Optional
+import psycopg2
 
-from fastapi import Depends, FastAPI, HTTPException
+from typing import Generator, Optional,List
+from fastapi import Depends, FastAPI, HTTPException,UploadFile, File, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
 from psycopg2 import OperationalError
 from psycopg2.pool import SimpleConnectionPool
+from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
+from qdrant_client import QdrantClient
+from qdrant_client.http import models as qmodels
+from openai import OpenAI
 
 # ---------- Env & App ----------
 load_dotenv()  # reads .env in project root
@@ -20,6 +26,22 @@ DB_NAME = os.getenv("DB_NAME", "postgres")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "mysecretpassword")
 
+
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "supportbot_documents")
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+EMBEDDING_MODEL = "text-embedding-3-small"
+EMBEDDING_DIM = 1536 
+
+# Chat model config
+CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-nano")
+
+# Qdrant search config
+TOP_K = 5               # how many chunks to retrieve
+MIN_SCORE = 0.35        # similarity threshold; tune this as needed
+
 app = FastAPI(title="AI Support Bot API")
 
 app.add_middleware(
@@ -28,6 +50,15 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# OpenAI client (sync)
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+# Qdrant client
+qdrant_client = QdrantClient(
+    url=QDRANT_URL,
+    api_key=QDRANT_API_KEY,
 )
 
 # ---------- Models (request/response) ----------
@@ -43,6 +74,26 @@ class LoginRequest(BaseModel):
 class UserOut(BaseModel):
     id: int
     email: EmailStr
+
+class ChatRequest(BaseModel):
+    """
+    Incoming payload from Streamlit:
+        {
+            "message": "... user question ...",
+            "file_id": 123
+        }
+    """
+    message: str
+    file_id: int
+
+class ChatResponse(BaseModel):
+    """
+    Outgoing payload to Streamlit:
+        {
+            "reply": "... bot answer ..."
+        }
+    """
+    reply: str
 
 # ---------- Password hashing helpers (PBKDF2) ----------
 # We store "pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>"
@@ -115,6 +166,7 @@ def startup_event() -> None:
             pool.putconn(conn)
 
         print("✅ DB pool initialized and schema verified.")
+        ensure_qdrant_collection()
     except OperationalError as e:
         print(f"❌ Failed to initialize DB pool: {e}")
         raise
@@ -137,6 +189,25 @@ def get_db_conn() -> Generator:
         yield conn
     finally:
         pool.putconn(conn)
+
+def ensure_qdrant_collection():
+    """
+    Creates the collection in Qdrant if it does not exist.
+    Uses cosine distance and fixed vector size.
+    """
+    try:
+        qdrant_client.get_collection(QDRANT_COLLECTION_NAME)
+        # If no exception, collection already exists.
+        return
+    except Exception:
+        # Collection does not exist yet -> create
+        qdrant_client.create_collection(
+            collection_name=QDRANT_COLLECTION_NAME,
+            vectors_config=qmodels.VectorParams(
+                size=EMBEDDING_DIM,
+                distance=qmodels.Distance.COSINE,
+            ),
+        )
 
 # ---------- Utility DB functions ----------
 def _email_exists(conn, email: str) -> bool:
@@ -165,6 +236,54 @@ def _get_user_by_email(conn, email: str):
             return None
         return {"id": row[0], "email": row[1], "password_hash": row[2]}
 
+# -------------------------
+# Helper: text chunking
+# -------------------------
+
+def chunk_text(text: str, max_chars: int = 1000) -> List[str]:
+    """
+    Very simple character-based chunker.
+    You can replace with token-based chunking later.
+    """
+    text = text.strip()
+    if not text:
+        return []
+
+    chunks: List[str] = []
+    start = 0
+    while start < len(text):
+        end = min(start + max_chars, len(text))
+        # Try to break at a newline or space for nicer chunks
+        break_pos = text.rfind("\n", start, end)
+        if break_pos == -1:
+            break_pos = text.rfind(" ", start, end)
+        if break_pos == -1 or break_pos <= start:
+            break_pos = end
+        chunks.append(text[start:break_pos].strip())
+        start = break_pos
+    return [c for c in chunks if c]
+
+# -------------------------
+# Helper: embeddings
+# -------------------------
+
+def embed_texts(texts: List[str]) -> List[List[float]]:
+    """
+    Calls OpenAI embeddings for a list of texts.
+    Returns a list of embedding vectors.
+    """
+    if not texts:
+        return []
+
+    response = openai_client.embeddings.create(
+        model=EMBEDDING_MODEL,
+        input=texts,
+    )
+
+    # Map back to list of floats
+    vectors: List[List[float]] = [d.embedding for d in response.data]
+    return vectors
+
 # ---------- Routes (existing) ----------
 @app.get("/health")
 def health(db=Depends(get_db_conn)):
@@ -176,17 +295,6 @@ def health(db=Depends(get_db_conn)):
         return {"status": "ok", "db": "up", "db_version": version}
     except Exception as e:
         return {"status": "degraded", "db": "down", "error": str(e)}
-
-@app.get("/db/ping")
-def db_ping(db=Depends(get_db_conn)):
-    """Lightweight DB ping endpoint."""
-    try:
-        with db.cursor() as cur:
-            cur.execute("SELECT 1;")
-            _ = cur.fetchone()
-        return {"db": "up"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"DB ping failed: {e}")
 
 # ---------- Auth Routes (simple & clear) ----------
 @app.post("/auth/register", response_model=UserOut, status_code=201)
@@ -230,3 +338,267 @@ def login_user(payload: LoginRequest, db=Depends(get_db_conn)):
         "message": "Login successful",
         "user": {"id": user["id"], "email": user["email"]},
     }
+
+# -------------------------
+# File upload endpoint
+# -------------------------
+
+@app.post("/files/upload")
+async def upload_file(file: UploadFile = File(...),conn=Depends(get_db_conn)):
+    """
+    Upload a file, create text chunks, embed them,
+    store metadata & chunks in Postgres, and embeddings in Qdrant.
+
+    Returns:
+        {
+            "message": "File uploaded successfully",
+            "file_id": <int>,
+            "chunks_stored": <int>
+        }
+    """
+    # Basic validation: only text for now
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Filename is required.",
+        )
+
+    # Example: restrict to .txt initially
+    if not file.filename.lower().endswith(".txt"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only .txt files are supported right now.",
+        )
+
+    try:
+        # Read file content into memory
+        raw_bytes = await file.read()
+        size_bytes = len(raw_bytes)
+        # Decode assuming UTF-8; adjust if needed
+        text_content = raw_bytes.decode("utf-8", errors="ignore")
+
+        # Chunk text
+        chunks = chunk_text(text_content, max_chars=1000)
+        if not chunks:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Uploaded file is empty or could not be parsed.",
+            )
+
+        # Generate embeddings
+        embeddings = embed_texts(chunks)
+        if len(embeddings) != len(chunks):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to generate embeddings for all chunks.",
+            )
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    # 1) Insert file metadata
+                    cur.execute(
+                        """
+                        INSERT INTO uploaded_files (filename, content_type, size_bytes)
+                        VALUES (%s, %s, %s)
+                        RETURNING id;
+                        """,
+                        (file.filename, file.content_type or "text/plain", size_bytes),
+                    )
+                    row = cur.fetchone()
+                    file_id = row[0] 
+
+                    # 2) Insert chunks
+                    chunk_rows = []
+                    for idx, chunk in enumerate(chunks):
+                        cur.execute(
+                            """
+                            INSERT INTO file_chunks (file_id, chunk_index, content)
+                            VALUES (%s, %s, %s)
+                            RETURNING id;
+                            """,
+                            (file_id, idx, chunk),
+                        )
+                    chunk_row = cur.fetchone()
+                    chunk_rows.append(chunk_row[0])
+
+            # Commit connection context manager already commits
+
+        finally:
+            conn.close()
+
+        # 3) Store embeddings in Qdrant
+        MAX_CHUNKS_PER_FILE = 100000 
+        points = []
+        for idx, (chunk_text_value, vector) in enumerate(zip(chunks, embeddings)):
+            point_id = file_id * MAX_CHUNKS_PER_FILE + idx
+            points.append(
+                qmodels.PointStruct(
+                    id=point_id,
+                    vector=vector,
+                    payload={
+                        "file_id": file_id,
+                        "chunk_index": idx,
+                        "filename": file.filename,
+                        "text": chunk_text_value,
+                    },
+                )
+            )
+
+        qdrant_client.upsert(
+            collection_name=QDRANT_COLLECTION_NAME,
+            points=points,
+        )
+
+        # If we reached here, everything went OK
+        return JSONResponse(
+            status_code=status.HTTP_201_CREATED,
+            content={
+                "message": "File uploaded successfully",
+                "file_id": file_id,
+                "chunks_stored": len(chunks),
+            },
+        )
+
+    except HTTPException:
+        # Re-raise FastAPI-controlled errors
+        raise
+    except Exception as exc:
+        # Generic failure path
+        # (Optionally: delete partial DB rows / Qdrant points to keep things consistent)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload file: {exc}",
+        )
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat_endpoint(payload: ChatRequest):
+    """
+    Chat over a single uploaded file.
+
+    Flow:
+      1. Embed the user question.
+      2. Search Qdrant in the given file's chunks (filter by file_id).
+      3. If no relevant chunk found -> return a friendly "no match" message.
+      4. Otherwise, send top chunks + question to OpenAI and return the answer.
+    """
+    question = payload.message.strip()
+    file_id = payload.file_id
+
+    if not question:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Question must not be empty.",
+        )
+
+    # 1) Embed the question using the same embedding model as for documents
+    try:
+        question_embedding = embed_texts([question])[0]
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to embed question: {exc}",
+        )
+
+    # 2) Search Qdrant for most similar chunks for this file_id
+    try:
+        search_results = qdrant_client.search(
+            collection_name=QDRANT_COLLECTION_NAME,
+            query_vector=question_embedding,
+            limit=TOP_K,
+            query_filter=qmodels.Filter(
+                must=[
+                    qmodels.FieldCondition(
+                        key="file_id",
+                        match=qmodels.MatchValue(value=file_id),
+                    )
+                ]
+            ),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Vector search failed: {exc}",
+        )
+
+    # No chunks at all
+    if not search_results:
+        return ChatResponse(
+            reply=(
+                "I couldn't find any relevant information in the uploaded document "
+                "for your question."
+            )
+        )
+
+    # Check best score against threshold for relevance
+    best_score = search_results[0].score
+    if best_score is None or best_score < MIN_SCORE:
+        return ChatResponse(
+            reply=(
+                "I searched your uploaded document but couldn't find a strong match "
+                "for your question. Please try rephrasing or ask about another part "
+                "of the document."
+            )
+        )
+
+    # 3) Build context from top-k chunks
+    context_snippets: List[str] = []
+    for hit in search_results:
+        payload = hit.payload or {}
+        text = payload.get("text", "")
+        chunk_index = payload.get("chunk_index", "?")
+        if text:
+            context_snippets.append(f"[Chunk {chunk_index}] {text}")
+
+    if not context_snippets:
+        return ChatResponse(
+            reply=(
+                "I tried to read relevant parts of the document, but couldn't extract "
+                "any usable text for your question."
+            )
+        )
+
+    context_block = "\n\n".join(context_snippets)
+
+    # 4) Ask OpenAI to answer based ONLY on this context
+    #    The instructions explicitly tell it not to hallucinate beyond context.
+    try:
+        prompt_for_model = (
+            "You are an AI assistant that answers questions using ONLY the provided document context.\n"
+            "If the answer is not clearly contained in the context, say that you cannot find it "
+            "in the document. Do NOT invent facts.\n\n"
+            f"Document context:\n{context_block}\n\n"
+            f"User question: {question}\n\n"
+            "Answer:"
+        )
+
+        completion = openai_client.chat.completions.create(
+            model=CHAT_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful support assistant that only uses the given context.",
+                },
+                {
+                    "role": "user",
+                    "content": prompt_for_model,
+                },
+            ],
+            temperature=0.2,
+        )
+
+        answer = completion.choices[0].message.content.strip()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"LLM call failed: {exc}",
+        )
+
+    # 5) Return the final answer to Streamlit
+    if not answer:
+        answer = (
+            "I tried to answer from the document, but couldn't generate a useful response. "
+            "Please try rephrasing your question."
+        )
+
+    return ChatResponse(reply=answer)
+
