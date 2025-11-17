@@ -32,7 +32,7 @@ QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "supportbot_documents")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-EMBEDDING_MODEL = "text-embedding-3-small"
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small") 
 EMBEDDING_DIM = 1536 
 
 # Chat model config
@@ -42,7 +42,7 @@ CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-nano")
 TOP_K = 5               # how many chunks to retrieve
 MIN_SCORE = 0.35        # similarity threshold; tune this as needed
 
-app = FastAPI(title="AI Support Bot API")
+app = FastAPI(title="AI Chat Bot API")
 
 app.add_middleware(
     CORSMiddleware,
