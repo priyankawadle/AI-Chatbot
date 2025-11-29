@@ -16,23 +16,9 @@ from app.config import (
     DB_PORT,
     DB_USER,
 )
+from app.db.schema import ensure_tables
 
 pool: Optional[SimpleConnectionPool] = None  # created at startup
-
-
-def _create_users_table_if_needed(conn) -> None:
-    """Create a minimal users table if it doesn't exist."""
-    sql = """
-    CREATE TABLE IF NOT EXISTS users (
-        id BIGSERIAL PRIMARY KEY,
-        email TEXT NOT NULL UNIQUE,
-        password_hash TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    """
-    with conn.cursor() as cur:
-        cur.execute(sql)
-    conn.commit()
 
 
 def init_pool() -> None:
@@ -52,13 +38,13 @@ def init_pool() -> None:
         connect_timeout=5,
     )
 
-    # Quick ping + ensure basic schema
+    # Quick ping + ensure base schema
     conn = pool.getconn()
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT 1;")
             cur.fetchone()
-        _create_users_table_if_needed(conn)
+        ensure_tables(conn)
     finally:
         pool.putconn(conn)
 
