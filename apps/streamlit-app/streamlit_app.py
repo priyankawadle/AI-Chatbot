@@ -307,7 +307,6 @@ with top_col2:
 
 # ---------- STEP 1: File upload (per conversation) ----------
 st.subheader("Step 1 · Upload a document")
-st.caption("Drag & drop or browse a file to upload.")
 
 uploaded_file = st.file_uploader(
     "Upload a file",
