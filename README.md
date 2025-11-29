@@ -279,28 +279,38 @@ Start Postgres docker
 cd AI-Customer-Support-Chatbot
 docker ps -a
 docker rm some-postgres
+//TO CREATE POSGRES CONTAINER
 docker run -d --name some-postgres `
   -e POSTGRES_PASSWORD=mysecretpassword `
   -e POSTGRES_USER=postgres `
   -e POSTGRES_DB=postgres `
   -p 5432:5432 `
   -v pg_data:/var/lib/postgresql/data `
-  postgres:16 -->
+  postgres:16 
+  //TO RUN POSTGRES CONTAINER
+  docker start chatbot-postgres
+  -->
 
 <!-- 
-START QDRANT
-docker run -p 6333:6333 qdrant/qdrant -->
+//CREATE QDRANT CONATINER
+docker run -p 6333:6333 qdrant/qdrant
+
+// TO START QRANT CONTAINER
+docker start chatbot-qdrant
+ -->
 
 <!--
 BACKEND START
 cd apps/backend     
 .venv\Scripts\activate        
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload -->
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+ -->
 
 
 <!--
-FRONTEND START
+//FRONTEND START
 cd apps/streamlit-app  
 .venv\Scripts\activate 
-streamlit run streamlit_app.py   -->
+streamlit run streamlit_app.py   
+-->
 

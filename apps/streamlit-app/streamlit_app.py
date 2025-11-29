@@ -10,6 +10,7 @@ API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
 class ChatResponse(BaseModel):
     reply: str
 
+
 class User(BaseModel):
     id: int
     email: EmailStr
@@ -46,198 +47,6 @@ def api_upload_file(path: str, file):
         r = client.post(url, files=files)
         r.raise_for_status()
         return r.json()
-
-
-# ---------- Global styles ----------
-
-def inject_global_styles():
-    """
-    Inject custom CSS to give a modern SaaS-style UI.
-    """
-    st.markdown(
-        """
-        <style>
-        /* ---- Global layout ---- */
-        [data-testid="stAppViewContainer"] {
-            background: linear-gradient(180deg, #f9fafb 0%, #eef2ff 30%, #f9fafb 100%);
-        }
-
-        [data-testid="stHeader"] {
-            background: transparent;
-        }
-
-        /* Center main content a bit and limit width */
-        [data-testid="stMain"] > div {
-            max-width: 1120px;
-            margin: 0 auto;
-            padding-top: 1rem;
-        }
-
-        /* ---- Sidebar styling ---- */
-        [data-testid="stSidebar"] {
-            background-color: #f7f8fa;
-            border-right: 1px solid #e5e7eb;
-        }
-
-        [data-testid="stSidebar"] .sidebar-content {
-            padding-top: 0.75rem;
-        }
-
-        [data-testid="stSidebar"] .css-1d391kg,  /* older streamlit */
-        [data-testid="stSidebar"] section {
-            padding-top: 0.75rem;
-        }
-
-        [data-testid="stSidebar"] h2, 
-        [data-testid="stSidebar"] h3 {
-            font-weight: 600;
-            color: #111827;
-        }
-
-        /* Conversation buttons in sidebar */
-        [data-testid="stSidebar"] button[kind="secondary"] {
-            border-radius: 999px;
-            border: 1px solid transparent;
-            padding: 0.25rem 0.9rem;
-            margin-bottom: 0.25rem;
-            font-size: 0.9rem;
-            text-align: left;
-        }
-        [data-testid="stSidebar"] button[kind="secondary"]:hover {
-            border-color: #3b82f6;
-            background: #eff6ff;
-            color: #1d4ed8;
-        }
-
-        /* New chat button — make it stand out a bit */
-        [data-testid="stSidebar"] button[kind="primary"] {
-            border-radius: 999px;
-            font-weight: 600;
-        }
-
-
-        .top-title {
-            font-size: 1.55rem;
-            font-weight: 700;
-            color: #111827;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .top-title span.icon {
-            font-size: 1.7rem;
-        }
-
-        .user-pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.45rem;
-            padding: 0.25rem 0.8rem;
-            border-radius: 999px;
-            background: #ecfdf3;
-            border: 1px solid #bbf7d0;
-            color: #166534;
-            font-size: 0.85rem;
-        }
-
-        .user-pill-avatar {
-            width: 26px;
-            height: 26px;
-            border-radius: 999px;
-            background: #22c55e22;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.9rem;
-        }
-
-        /* Logout button next to pill */
-        .logout-wrapper button {
-            border-radius: 999px !important;
-            padding: 0.25rem 0.9rem !important;
-            font-size: 0.85rem !important;
-        }
-
-        /* ---- Step cards ---- */
-        .step-card {
-            background: #ffffff;
-            border-radius: 16px;
-            box-shadow: 0 14px 34px rgba(15, 23, 42, 0.04);
-            border: 1px solid #e5e7eb;
-            margin-bottom: 1.2rem;
-        }
-
-        .step-header {
-            font-weight: 600;
-            font-size: 1.02rem;
-            color: #111827;
-            margin-bottom: 0.15rem;
-        }
-
-        .step-caption {
-            font-size: 0.9rem;
-            color: #6b7280;
-            margin-bottom: 0.6rem;
-        }
-
-        /* ---- File uploader ---- */
-        [data-testid="stFileUploader"] section {
-            border-radius: 14px;
-            border: 1px dashed #cbd5f5;
-            background: #f9fafb;
-        }
-
-        [data-testid="stFileUploader"] section:hover {
-            border-color: #3b82f6;
-            background: #eff6ff;
-        }
-
-        [data-testid="stFileUploader"] label {
-            font-size: 0.92rem;
-        }
-
-        /* Upload button full-width & pill-shaped */
-        .upload-btn-wrapper button {
-            width: 100%;
-            border-radius: 999px !important;
-            font-weight: 600;
-        }
-
-        /* Info strip under uploader */
-        .info-strip {
-            margin-top: 0.6rem;
-            padding: 0.7rem 0.9rem;
-            border-radius: 12px;
-            background: #eff6ff;
-            color: #1d4ed8;
-            font-size: 0.88rem;
-        }
-
-        /* Active document success message */
-        .active-doc {
-            font-size: 0.9rem;
-        }
-
-        /* ---- Chat messages ---- */
-        .element-container:has([data-testid="stChatMessage"]) {
-            margin-bottom: 0.35rem;
-        }
-
-        /* Chat input area */
-        [data-testid="stChatInput"] textarea {
-            border-radius: 999px !important;
-        }
-
-        /* General buttons (outside sidebar) */
-        button[kind="secondary"] {
-            border-radius: 999px !important;
-        }
-
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 # ---------- Conversation helpers (local only for now) ----------
@@ -362,7 +171,7 @@ def show_auth_page():
 
     # ----- Login tab -----
     with tabs[0]:
-        st.markdown("#### Sign in to your workspace")
+        st.subheader("Sign in to your workspace")
         with st.form("login_form", clear_on_submit=False):
             login_email = st.text_input("Work email", key="login_email")
             login_password = st.text_input("Password", type="password", key="login_password")
@@ -393,7 +202,7 @@ def show_auth_page():
 
     # ----- Register tab -----
     with tabs[1]:
-        st.markdown("#### Create a new account")
+        st.subheader("Create a new account")
         with st.form("register_form", clear_on_submit=False):
             reg_email = st.text_input("Work email", key="reg_email")
             reg_password = st.text_input("Password", type="password", key="reg_password")
@@ -433,9 +242,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# Inject custom CSS once
-inject_global_styles()
-
 # Base session state for auth
 if "user" not in st.session_state:
     st.session_state.user = None  # {"id": ..., "email": ...}
@@ -450,7 +256,7 @@ ensure_conversation_state()
 
 # ---------- Sidebar: Conversation history ----------
 with st.sidebar:
-    st.markdown("### Chat history")
+    st.header("Chat history")
 
     # List conversations (local only for now)
     if st.session_state.conversations:
@@ -475,35 +281,20 @@ if not active_conv:
     create_new_conversation(initial=True)
     active_conv = get_active_conversation()
 
-# ---------- Top bar: Title + Account details (right corner) ----------
-st.markdown('<div class="top-header-card">', unsafe_allow_html=True)
-header_cols = st.columns([4, 3])
+# ---------- Top bar: Title + Account details ----------
+top_col1, top_col2 = st.columns([4, 3])
 
-with header_cols[0]:
-    st.markdown(
-        '<div class="top-title"><span class="icon">🤖</span>'
-        '<span>AI ChatBot</span></div>',
-        unsafe_allow_html=True,
-    )
-with header_cols[1]:
-    user_cols = st.columns([3, 2])
-    with user_cols[0]:
-        email = st.session_state.user["email"]
-        st.markdown(
-            f"""
-            <div class="user-pill">
-                <div class="user-pill-avatar">👤</div>
-                <div>
-                    <div style="font-weight:600;">Logged in</div>
-                    <div style="font-size:0.8rem;">{email}</div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with user_cols[1]:
-        st.markdown('<div class="logout-wrapper">', unsafe_allow_html=True)
-        if st.button("Logout", key="logout_btn", type="secondary"):
+with top_col1:
+    st.title("🤖 AI ChatBot")
+
+with top_col2:
+    email = st.session_state.user["email"]
+    info_col1, info_col2 = st.columns([3, 2])
+    with info_col1:
+        st.write("Logged in")
+        st.write(f"**{email}**")
+    with info_col2:
+        if st.button("Logout", key="logout_btn"):
             # Clear all state on logout
             st.session_state.user = None
             st.session_state.conversations = []
@@ -513,23 +304,17 @@ with header_cols[1]:
             st.session_state.file_name = None
             st.toast("Logged out", icon="✅")
             st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
-
-st.markdown("</div>", unsafe_allow_html=True)  # end top-header-card
 
 # ---------- STEP 1: File upload (per conversation) ----------
-st.markdown('<div class="step-card">', unsafe_allow_html=True)
-st.markdown('<div class="step-header">Step 1 · Upload a document</div>', unsafe_allow_html=True)
-
+st.subheader("Step 1 · Upload a document")
+st.caption("Drag & drop or browse a file to upload.")
 
 uploaded_file = st.file_uploader(
-    "Drag & drop or browse a file",
+    "Upload a file",
     type=["txt", "pdf"],
-    label_visibility="collapsed",
 )
 
 upload_btn_disabled = uploaded_file is None
-st.markdown('<div class="upload-btn-wrapper">', unsafe_allow_html=True)
 if st.button("📤 Upload file to server", disabled=upload_btn_disabled, use_container_width=True):
     if uploaded_file is None:
         st.warning("Please select a file first.")
@@ -561,35 +346,17 @@ if st.button("📤 Upload file to server", disabled=upload_btn_disabled, use_con
             st.error(f"File upload failed: {detail}")
         except Exception as e:
             st.error(f"Unexpected error during upload: {e}")
-st.markdown("</div>", unsafe_allow_html=True)  # end upload-btn-wrapper
 
 if not st.session_state.file_id:
-    st.markdown(
-        '<div class="info-strip">Please upload a file for this chat. Once it is processed, '
-        "you can start asking questions about its content.</div>",
-        unsafe_allow_html=True,
+    st.info(
+        "Please upload a file for this chat. Once it is processed, "
+        "you can start asking questions about its content."
     )
-    st.markdown("</div>", unsafe_allow_html=True)  # end step-card
     st.stop()
 
-# If we have a file_id, show active document info
-st.markdown(
-    '<div class="info-strip active-doc">'
-    f'Active document: <strong>{st.session_state.file_name}</strong> '
-    f'(file_id={st.session_state.file_id})'
-    "</div>",
-    unsafe_allow_html=True,
-)
-
-st.markdown("</div>", unsafe_allow_html=True)  # end step-card
-
 # ---------- STEP 2: Chat about the uploaded file ----------
-st.markdown('<div class="step-card">', unsafe_allow_html=True)
-st.markdown('<div class="step-header">Step 2 · Ask questions about this document</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="step-caption">Type your question in natural language. The assistant will answer based on the uploaded file.</div>',
-    unsafe_allow_html=True,
-)
+st.subheader("Step 2 · Ask questions about this document")
+st.caption("Type your question in natural language. The assistant will answer based on the uploaded file.")
 
 # Render chat history for this conversation
 for role, content in st.session_state.messages:
@@ -626,5 +393,3 @@ if prompt := st.chat_input("Ask a question about the uploaded file..."):
 
     with st.chat_message("assistant"):
         st.markdown(bot_reply)
-
-st.markdown("</div>", unsafe_allow_html=True)  # end step-card
