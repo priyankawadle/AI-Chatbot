@@ -274,12 +274,12 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reloa
 -->
 
 
-<!-- 
-Start Postgres docker
+
+<!-- //Start Postgres docker -->
 cd AI-Customer-Support-Chatbot
 docker ps -a
 docker rm some-postgres
-//TO CREATE POSGRES CONTAINER
+<!-- //TO CREATE POSGRES CONTAINER -->
 docker run -d --name some-postgres `
   -e POSTGRES_PASSWORD=mysecretpassword `
   -e POSTGRES_USER=postgres `
@@ -287,30 +287,32 @@ docker run -d --name some-postgres `
   -p 5432:5432 `
   -v pg_data:/var/lib/postgresql/data `
   postgres:16 
-  //TO RUN POSTGRES CONTAINER
+<!-- //TO RUN POSTGRES CONTAINER -->
   docker start chatbot-postgres
-  -->
 
-<!-- 
-//CREATE QDRANT CONATINER
+
+<!-- //CREATE QDRANT CONATINER -->
 docker run -p 6333:6333 qdrant/qdrant
 
-// TO START QRANT CONTAINER
+<!-- // TO START QRANT CONTAINER -->
 docker start chatbot-qdrant
- -->
+ 
 
-<!--
-BACKEND START
+
+<!-- BACKEND START -->
 cd apps/backend     
 .venv\Scripts\activate        
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
- -->
+ 
 
 
-<!--
-//FRONTEND START
+<!-- //FRONTEND START -->
 cd apps/streamlit-app  
 .venv\Scripts\activate 
 streamlit run streamlit_app.py   
--->
 
+<!-- remove .venv and install again -->
+AI-Chatbot\apps\streamlit-app> deactivate
+Remove-Item -Recurse -Force .venv
+python -m venv .venv
+.\.venv\Scripts\activate
