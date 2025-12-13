@@ -1,9 +1,14 @@
 """Auth page rendering (login + register)."""
 import httpx
-import streamlit as st
 from pydantic import ValidationError
+import streamlit as st
 
 from frontend.api import api_post
+from frontend.state import (
+    persist_auth_to_query_params,
+    reset_conversation_state,
+    restore_conversations_for_user,
+)
 
 
 def show_auth_page():
@@ -23,14 +28,13 @@ def show_auth_page():
         if login_submitted:
             try:
                 data = api_post("/auth/login", {"email": login_email, "password": login_password})
-                # backend returns: {"message": "...", "user": {"id": ..., "email": ...}}
+                # backend returns: {"user": {"id": ..., "email": ...}, "tokens": {...}}
                 st.session_state.user = data["user"]
-                # Reset all conversation-related state on fresh login
-                st.session_state.conversations = []
-                st.session_state.active_conv_id = None
-                st.session_state.messages = []
-                st.session_state.file_id = None
-                st.session_state.file_name = None
+                st.session_state.tokens = data.get("tokens")
+                persist_auth_to_query_params()
+                # Restore prior conversations for this user if cached; otherwise start fresh
+                if not restore_conversations_for_user(st.session_state.user["email"]):
+                    reset_conversation_state()
                 st.toast("Login successful", icon="\U00002705")
                 st.rerun()
             except ValidationError as ve:
@@ -51,22 +55,28 @@ def show_auth_page():
             reg_email = st.text_input("Work email", key="reg_email")
             reg_password = st.text_input("Password", type="password", key="reg_password")
             reg_confirm = st.text_input("Confirm password", type="password", key="reg_confirm")
+            reg_role = st.selectbox("Role", options=["user", "admin"], index=0, help="Admins can upload files; users can chat.")
             reg_submitted = st.form_submit_button("Create account")
         if reg_submitted:
             if reg_password != reg_confirm:
                 st.error("Passwords do not match.")
             else:
                 try:
-                    # backend 201 -> returns UserOut: {"id": ..., "email": ...}
-                    user = api_post("/auth/register", {"email": reg_email, "password": reg_password})
+                    # backend 201 -> returns AuthResponse: {"user": {...}, "tokens": {...}}
+                    resp = api_post(
+                        "/auth/register",
+                        {
+                            "email": reg_email,
+                            "password": reg_password,
+                            "role": reg_role,
+                        },
+                    )
                     st.success("Registration successful. You can log in now.")
-                    st.session_state.user = user
-                    # On fresh registration, also reset conversation state
-                    st.session_state.conversations = []
-                    st.session_state.active_conv_id = None
-                    st.session_state.messages = []
-                    st.session_state.file_id = None
-                    st.session_state.file_name = None
+                    st.session_state.user = resp["user"]
+                    st.session_state.tokens = resp.get("tokens")
+                    persist_auth_to_query_params()
+                    reset_conversation_state()
+                    st.toast("Registration successful", icon="\U00002705")
                     st.rerun()
                 except httpx.HTTPStatusError as he:
                     try:

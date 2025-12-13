@@ -12,6 +12,11 @@ from frontend.state import (
 
 def render_upload_step(active_conv):
     """Render upload UI and sync file metadata into conversation state."""
+    role = (st.session_state.user or {}).get("role", "user")
+    if role != "admin":
+        st.info("Only admins can upload documents. Please ask an admin to upload files.")
+        return
+
     st.subheader("Step 1 - Upload a document")
 
     uploaded_file = st.file_uploader(
@@ -56,8 +61,15 @@ def render_upload_step(active_conv):
 
 def render_chat_step():
     """Render chat UI for the uploaded file."""
+    role = (st.session_state.user or {}).get("role", "user")
+    if role == "admin":
+        st.info("Chat is available only to users. Switch to a user account to ask questions.")
+        return
+
     st.subheader("Step 2 - Ask questions about this document")
     st.caption("Type your question in natural language. The assistant will answer based on the uploaded file.")
+    if not st.session_state.file_id:
+        st.info("We'll answer using the most recently uploaded document from an admin.")
 
     # Render chat history for this conversation
     for role, content in st.session_state.messages:
@@ -80,11 +92,10 @@ def render_chat_step():
 
         # Call backend chat API
         try:
-            payload = {
-                "message": prompt,
-                "file_id": st.session_state.file_id,
-                # optionally: "user_id": st.session_state.user["id"]
-            }
+            payload = {"message": prompt}
+            if st.session_state.file_id:
+                payload["file_id"] = st.session_state.file_id
+            # optionally: "user_id": st.session_state.user["id"]
             data = api_post("/chat", payload)
             bot_reply = ChatResponse(**data).reply
         except Exception as e:

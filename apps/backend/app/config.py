@@ -1,3 +1,4 @@
+
 """
 Basic settings used across the API.
 The values are loaded from environment variables so they can be changed
@@ -38,3 +39,9 @@ SUPPORTED_EXTENSIONS = (".txt", ".pdf")
 # FastAPI app metadata and CORS
 APP_TITLE = "AI Chat Bot API"
 ALLOWED_ORIGINS = ["http://localhost:8501", "http://127.0.0.1:8501"]
+
+# JWT settings
+JWT_SECRET = os.getenv("JWT_SECRET", "change-this-secret")
+JWT_ALGO = os.getenv("JWT_ALGO", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "30"))

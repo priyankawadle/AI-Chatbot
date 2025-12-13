@@ -1,19 +1,20 @@
 """Routes that handle chat over uploaded documents."""
 from typing import List
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from qdrant_client.http import models as qmodels
 
 from app.config import CHAT_MODEL, MIN_SCORE, QDRANT_COLLECTION_NAME, TOP_K
 from app.models.schemas import ChatRequest, ChatResponse
 from app.services.embeddings import embed_texts, openai_client
 from app.services.vector_store import qdrant_client
+from app.db.database import get_db_conn
 
 router = APIRouter(tags=["chat"])
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(payload: ChatRequest):
+async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn)):
     """
     Chat over a single uploaded file.
 
@@ -41,11 +42,23 @@ async def chat_endpoint(payload: ChatRequest):
             detail=f"Failed to embed question: {exc}",
         )
 
+    # Resolve file_id if not provided: default to most recently uploaded file
+    if file_id is None:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM uploaded_files ORDER BY created_at DESC LIMIT 1;")
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No uploaded files available yet. Please ask an admin to upload one.",
+                )
+            file_id = row[0]
+
     # 2) Search Qdrant for most similar chunks for this file_id
     try:
-        search_results = qdrant_client.search(
+        response = qdrant_client.query_points(
             collection_name=QDRANT_COLLECTION_NAME,
-            query_vector=question_embedding,
+            query=question_embedding,
             limit=TOP_K,
             query_filter=qmodels.Filter(
                 must=[
@@ -56,6 +69,7 @@ async def chat_endpoint(payload: ChatRequest):
                 ]
             ),
         )
+        search_results = response.points
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -1,11 +1,23 @@
 """Helpers to manage Streamlit session state in one place."""
+import base64
+import copy
+import json
+from typing import Optional
+
 import streamlit as st
+
+AUTH_QUERY_KEY = "auth"
 
 
 def ensure_base_state():
     """Ensure the base auth-related keys are present."""
     if "user" not in st.session_state:
         st.session_state.user = None  # {"id": ..., "email": ...}
+    if "tokens" not in st.session_state:
+        st.session_state.tokens = None  # {"access_token": ..., "refresh_token": ...}
+    if "conversation_cache" not in st.session_state:
+        # Per-user in-memory cache so chat history survives logout/login within the same browser session.
+        st.session_state.conversation_cache = {}
 
 
 def ensure_conversation_state():
@@ -28,6 +40,12 @@ def ensure_conversation_state():
 
     if "file_name" not in st.session_state:
         st.session_state.file_name = None
+
+    # Try to restore cached conversations for this user if present
+    if st.session_state.user and not st.session_state.conversations:
+        restored = restore_conversations_for_user(st.session_state.user["email"])
+        if restored:
+            return
 
     # If logged in and no conversation yet, create the first one
     if st.session_state.user and st.session_state.active_conv_id is None:
@@ -113,3 +131,93 @@ def maybe_update_conversation_title_from_prompt(prompt: str):
             return
         max_len = 40
         conv["title"] = trimmed[:max_len] + ("..." if len(trimmed) > max_len else "")
+
+
+def reset_conversation_state():
+    """Clear chat-related state for a fresh start."""
+    st.session_state.conversations = []
+    st.session_state.active_conv_id = None
+    st.session_state.messages = []
+    st.session_state.file_id = None
+    st.session_state.file_name = None
+
+
+def stash_conversations_for_user(email: str):
+    """Cache current conversations for a given user inside session_state."""
+    if not email:
+        return
+    st.session_state.conversation_cache[email] = {
+        "conversations": copy.deepcopy(st.session_state.get("conversations", [])),
+        "active_conv_id": st.session_state.get("active_conv_id"),
+    }
+
+
+def restore_conversations_for_user(email: str) -> bool:
+    """Restore cached conversations if available. Returns True on success."""
+    if not email:
+        return False
+    cache = st.session_state.conversation_cache.get(email)
+    if not cache:
+        return False
+
+    st.session_state.conversations = copy.deepcopy(cache.get("conversations", []))
+    st.session_state.active_conv_id = cache.get("active_conv_id")
+
+    # Align top-level convenience fields with the active conversation
+    active = get_active_conversation()
+    if active:
+        st.session_state.messages = active.get("messages", [])
+        active["messages"] = st.session_state.messages  # keep shared reference
+        st.session_state.file_id = active.get("file_id")
+        st.session_state.file_name = active.get("file_name")
+    else:
+        reset_conversation_state()
+    return True
+
+
+# ---- Lightweight auth persistence across refresh ----
+
+
+def _encode_auth_payload(user: dict, tokens: Optional[dict]) -> str:
+    payload = {"user": user, "tokens": tokens}
+    raw = json.dumps(payload).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def _decode_auth_payload(value: str) -> Optional[dict]:
+    try:
+        raw = base64.urlsafe_b64decode(value.encode("ascii"))
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def hydrate_auth_from_query_params():
+    """
+    If session_state is empty (new session) but we have auth data encoded
+    in the URL query params, restore it so a browser refresh doesn't log out.
+    """
+    if st.session_state.get("user"):
+        return
+    params = st.query_params
+    encoded = params.get(AUTH_QUERY_KEY)
+    if not encoded:
+        return
+    payload = _decode_auth_payload(encoded[0] if isinstance(encoded, list) else encoded)
+    if payload and payload.get("user"):
+        st.session_state.user = payload["user"]
+        st.session_state.tokens = payload.get("tokens")
+
+
+def persist_auth_to_query_params():
+    """Store current auth (user + tokens) in URL query params for reload resilience."""
+    user = st.session_state.get("user")
+    if not user:
+        return
+    encoded = _encode_auth_payload(user, st.session_state.get("tokens"))
+    st.query_params = {AUTH_QUERY_KEY: encoded}
+
+
+def clear_auth_query_params():
+    """Remove auth payload from query params, used on logout."""
+    st.query_params = {}
