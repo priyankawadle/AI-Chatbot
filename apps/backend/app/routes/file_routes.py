@@ -171,3 +171,50 @@ async def upload_file(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to upload file: {exc}",
         )
+
+
+@router.get("/history")
+async def list_uploaded_files(conn=Depends(get_db_conn)):
+    """
+    Return a list of previously uploaded files with basic metadata + chunk counts.
+    Used by the Streamlit sidebar history to populate file pickers.
+    """
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    f.id,
+                    f.filename,
+                    f.content_type,
+                    f.size_bytes,
+                    f.created_at,
+                    COUNT(c.id) AS chunk_count
+                FROM uploaded_files f
+                LEFT JOIN file_chunks c ON c.file_id = f.id
+                GROUP BY f.id
+                ORDER BY f.created_at DESC;
+                """
+            )
+            rows = cur.fetchall()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load uploaded file history: {exc}",
+        )
+
+    files = []
+    for row in rows:
+        created_at = row[4]
+        files.append(
+            {
+                "id": row[0],
+                "filename": row[1],
+                "content_type": row[2],
+                "size_bytes": row[3],
+                "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else created_at,
+                "chunk_count": row[5],
+            }
+        )
+
+    return {"files": files}

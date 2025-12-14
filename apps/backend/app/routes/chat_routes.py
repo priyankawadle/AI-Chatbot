@@ -42,32 +42,33 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn)):
             detail=f"Failed to embed question: {exc}",
         )
 
-    # Resolve file_id if not provided: default to most recently uploaded file
+    # Resolve file_id if not provided: default to searching across all uploaded files
+    query_filter = None
     if file_id is None:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM uploaded_files ORDER BY created_at DESC LIMIT 1;")
-            row = cur.fetchone()
-            if not row:
+            cur.execute("SELECT 1 FROM uploaded_files LIMIT 1;")
+            if not cur.fetchone():
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="No uploaded files available yet. Please ask an admin to upload one.",
                 )
-            file_id = row[0]
+    else:
+        query_filter = qmodels.Filter(
+            must=[
+                qmodels.FieldCondition(
+                    key="file_id",
+                    match=qmodels.MatchValue(value=file_id),
+                )
+            ]
+        )
 
-    # 2) Search Qdrant for most similar chunks for this file_id
+    # 2) Search Qdrant for most similar chunks
     try:
         response = qdrant_client.query_points(
             collection_name=QDRANT_COLLECTION_NAME,
             query=question_embedding,
             limit=TOP_K,
-            query_filter=qmodels.Filter(
-                must=[
-                    qmodels.FieldCondition(
-                        key="file_id",
-                        match=qmodels.MatchValue(value=file_id),
-                    )
-                ]
-            ),
+            query_filter=query_filter,
         )
         search_results = response.points
     except Exception as exc:

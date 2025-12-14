@@ -15,6 +15,12 @@ def ensure_base_state():
         st.session_state.user = None  # {"id": ..., "email": ...}
     if "tokens" not in st.session_state:
         st.session_state.tokens = None  # {"access_token": ..., "refresh_token": ...}
+    if "uploads" not in st.session_state:
+        st.session_state.uploads = []  # admin-only: [{"file_id": int, "file_name": str}]
+    if "upload_history_loaded" not in st.session_state:
+        st.session_state.upload_history_loaded = False
+    if "uploader_key" not in st.session_state:
+        st.session_state.uploader_key = 0  # used to reset the file_uploader widget
     if "conversation_cache" not in st.session_state:
         # Per-user in-memory cache so chat history survives logout/login within the same browser session.
         st.session_state.conversation_cache = {}
@@ -173,6 +179,35 @@ def restore_conversations_for_user(email: str) -> bool:
     else:
         reset_conversation_state()
     return True
+
+
+# ---- File upload history helpers ----
+
+
+def fetch_upload_history(force_refresh: bool = False):
+    """
+    Fetch uploaded file history from the backend and cache it in session_state.
+    Set force_refresh=True to ignore the cached list.
+    """
+    if (
+        st.session_state.upload_history_loaded
+        and st.session_state.get("uploads")
+        and not force_refresh
+    ):
+        return st.session_state.uploads
+
+    # Import locally to avoid circular imports at module load time
+    from frontend.api import api_get
+
+    try:
+        resp = api_get("/files/history")
+        st.session_state.uploads = resp.get("files", [])
+        st.session_state.upload_history_loaded = True
+    except Exception:
+        st.session_state.upload_history_loaded = False
+        raise
+
+    return st.session_state.uploads
 
 
 # ---- Lightweight auth persistence across refresh ----

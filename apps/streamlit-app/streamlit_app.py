@@ -69,6 +69,8 @@ with top_col2:
             st.session_state.messages = []
             st.session_state.file_id = None
             st.session_state.file_name = None
+            st.session_state.uploads = []
+            st.session_state.upload_history_loaded = False
             clear_auth_query_params()
             st.toast("Logged out", icon="\u2705")
             st.rerun()

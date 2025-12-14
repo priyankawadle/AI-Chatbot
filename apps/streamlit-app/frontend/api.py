@@ -4,6 +4,17 @@ import httpx
 from frontend.config import API_BASE
 
 
+def api_get(path: str):
+    """
+    Simple GET helper for list-style endpoints.
+    """
+    url = f"{API_BASE}{path}"
+    with httpx.Client(timeout=30.0) as client:
+        r = client.get(url)
+        r.raise_for_status()
+        return r.json()
+
+
 def api_post(path: str, payload: dict):
     """
     Simple JSON POST helper for normal endpoints like /auth/login, /chat, etc.
