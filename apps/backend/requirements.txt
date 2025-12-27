@@ -38,7 +38,6 @@ pypdf==6.4.1
 pypdfium2==5.1.0
 python-dotenv==1.2.1
 python-multipart==0.0.20
-pywin32==311
 PyYAML==6.0.3
 qdrant-client==1.16.1
 sniffio==1.3.1
