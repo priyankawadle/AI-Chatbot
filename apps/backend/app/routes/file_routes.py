@@ -8,7 +8,7 @@ from app.config import (
     SUPPORTED_EXTENSIONS,
     QDRANT_COLLECTION_NAME,
 )
-from app.db.database import get_db_conn
+from app.db.database import DB_PLACEHOLDER, IS_SQLITE, db_cursor, get_db_conn
 from app.services.chunking import chunk_text
 from app.services.embeddings import embed_texts
 from app.services.pdf_processing import extract_text_from_pdf
@@ -86,37 +86,42 @@ async def upload_file(
                 detail="Failed to generate embeddings for all chunks.",
             )
 
-        # 6) Store file metadata + chunks in Postgres
+        # 6) Store file metadata + chunks in Postgres/SQLite
         try:
-            with conn.cursor() as cur:
+            with db_cursor(conn) as cur:
                 # Insert file metadata
-                cur.execute(
-                    """
+                insert_meta_sql = f"""
                     INSERT INTO uploaded_files (filename, content_type, size_bytes)
-                    VALUES (%s, %s, %s)
-                    RETURNING id;
-                    """,
+                    VALUES ({DB_PLACEHOLDER}, {DB_PLACEHOLDER}, {DB_PLACEHOLDER})
+                """
+                if not IS_SQLITE:
+                    insert_meta_sql += " RETURNING id;"
+                else:
+                    insert_meta_sql += ";"
+
+                cur.execute(
+                    insert_meta_sql,
                     (
                         file.filename,
                         file.content_type or "application/octet-stream",
                         size_bytes,
                     ),
                 )
-                row = cur.fetchone()
-                if not row:
+                file_id = cur.lastrowid if IS_SQLITE else (cur.fetchone() or [None])[0]
+                if not file_id:
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail="Failed to persist file metadata.",
                     )
-                file_id = row[0]
 
                 # Insert chunks; if you need chunk_ids, collect them here
+                insert_chunk_sql = f"""
+                    INSERT INTO file_chunks (file_id, chunk_index, content)
+                    VALUES ({DB_PLACEHOLDER}, {DB_PLACEHOLDER}, {DB_PLACEHOLDER});
+                """
                 for idx, chunk in enumerate(chunks):
                     cur.execute(
-                        """
-                        INSERT INTO file_chunks (file_id, chunk_index, content)
-                        VALUES (%s, %s, %s);
-                        """,
+                        insert_chunk_sql,
                         (file_id, idx, chunk),
                     )
             conn.commit()
@@ -180,7 +185,7 @@ async def list_uploaded_files(conn=Depends(get_db_conn)):
     Used by the Streamlit sidebar history to populate file pickers.
     """
     try:
-        with conn.cursor() as cur:
+        with db_cursor(conn) as cur:
             cur.execute(
                 """
                 SELECT
@@ -206,13 +211,14 @@ async def list_uploaded_files(conn=Depends(get_db_conn)):
     files = []
     for row in rows:
         created_at = row[4]
+        created_at_str = created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
         files.append(
             {
                 "id": row[0],
                 "filename": row[1],
                 "content_type": row[2],
                 "size_bytes": row[3],
-                "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else created_at,
+                "created_at": created_at_str,
                 "chunk_count": row[5],
             }
         )

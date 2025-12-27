@@ -5,6 +5,7 @@ The values are loaded from environment variables so they can be changed
 without touching the code (handy for local dev vs. production).
 """
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -12,16 +13,19 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Database settings
+DB_DRIVER = os.getenv("DB_DRIVER", "postgres").lower()
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = int(os.getenv("DB_PORT", "5432"))
 DB_NAME = os.getenv("DB_NAME", "postgres")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "mysecretpassword")
+SQLITE_PATH = os.getenv("SQLITE_PATH", str(Path("data") / "app.db"))
 
 # Qdrant (vector database) settings
-QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_URL = os.getenv("QDRANT_URL")  # If unset, we'll use embedded mode
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "supportbot_documents")
+QDRANT_PATH = os.getenv("QDRANT_PATH", str(Path("data") / "qdrant"))
 
 # OpenAI settings
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -38,7 +42,12 @@ SUPPORTED_EXTENSIONS = (".txt", ".pdf")
 
 # FastAPI app metadata and CORS
 APP_TITLE = "AI Chat Bot API"
-ALLOWED_ORIGINS = ["http://localhost:8501", "http://127.0.0.1:8501"]
+raw_origins = os.getenv("ALLOWED_ORIGINS")
+if raw_origins:
+    ALLOWED_ORIGINS = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+else:
+    # Default to permissive for co-located Streamlit/Backend deployments (e.g., Hugging Face Space)
+    ALLOWED_ORIGINS = ["*"]
 
 # JWT settings
 JWT_SECRET = os.getenv("JWT_SECRET", "change-this-secret")

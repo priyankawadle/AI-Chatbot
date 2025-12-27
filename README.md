@@ -316,3 +316,18 @@ AI-Chatbot\apps\streamlit-app> deactivate
 Remove-Item -Recurse -Force .venv
 python -m venv .venv
 .\.venv\Scripts\activate
+
+## Hugging Face Space (Docker) quick start
+
+This repo now ships with a Dockerfile + entrypoint wired for Hugging Face Spaces. The container runs FastAPI on port 8000 (SQLite + embedded Qdrant) and Streamlit on the public port 7860.
+
+Steps:
+1) Create a new Space on Hugging Face with SDK set to **Docker**.
+2) Push this repo to the Space (include `Dockerfile` and `entrypoint.sh`).
+3) In the Space settings, add secrets: at minimum `OPENAI_API_KEY`; optional `JWT_SECRET`, `ALLOWED_ORIGINS`, and `QDRANT_URL` if you want a remote Qdrant instead of the embedded store.
+4) Build will install both backend and Streamlit requirements, then start uvicorn (0.0.0.0:8000) and Streamlit (0.0.0.0:7860). The frontend talks to the backend at `http://127.0.0.1:8000` via `API_BASE`.
+
+Defaults for Spaces:
+* DB: SQLite at `/app/data/app.db` (set `DB_DRIVER=postgres` plus connection envs if you prefer Postgres).
+* Vectors: embedded Qdrant at `/app/data/qdrant` (set `QDRANT_URL` to point at a managed Qdrant instead).
+* CORS: `ALLOWED_ORIGINS="*"` unless you override via env.

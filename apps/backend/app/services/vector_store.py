@@ -1,4 +1,6 @@
 """Helpers for talking to Qdrant (vector search)."""
+from pathlib import Path
+
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
@@ -6,14 +8,24 @@ from app.config import (
     EMBEDDING_DIM,
     QDRANT_API_KEY,
     QDRANT_COLLECTION_NAME,
+    QDRANT_PATH,
     QDRANT_URL,
 )
 
+
+def _build_client() -> QdrantClient:
+    """
+    Use remote Qdrant if QDRANT_URL is set; otherwise fall back to embedded mode
+    (stores data under QDRANT_PATH).
+    """
+    if QDRANT_URL:
+        return QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+    Path(QDRANT_PATH).mkdir(parents=True, exist_ok=True)
+    return QdrantClient(path=QDRANT_PATH)
+
+
 # Shared Qdrant client instance
-qdrant_client = QdrantClient(
-    url=QDRANT_URL,
-    api_key=QDRANT_API_KEY,
-)
+qdrant_client = _build_client()
 
 
 def ensure_qdrant_collection() -> None:

@@ -8,7 +8,7 @@ from app.config import CHAT_MODEL, MIN_SCORE, QDRANT_COLLECTION_NAME, TOP_K
 from app.models.schemas import ChatRequest, ChatResponse
 from app.services.embeddings import embed_texts, openai_client
 from app.services.vector_store import qdrant_client
-from app.db.database import get_db_conn
+from app.db.database import db_cursor, get_db_conn
 
 router = APIRouter(tags=["chat"])
 
@@ -45,7 +45,7 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn)):
     # Resolve file_id if not provided: default to searching across all uploaded files
     query_filter = None
     if file_id is None:
-        with conn.cursor() as cur:
+        with db_cursor(conn) as cur:
             cur.execute("SELECT 1 FROM uploaded_files LIMIT 1;")
             if not cur.fetchone():
                 raise HTTPException(

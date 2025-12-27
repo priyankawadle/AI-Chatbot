@@ -13,9 +13,11 @@ from app.services.vector_store import ensure_qdrant_collection
 app = FastAPI(title=APP_TITLE)
 
 # Enable CORS for the Streamlit frontend
+allow_all = ALLOWED_ORIGINS == ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=[] if allow_all else ALLOWED_ORIGINS,
+    allow_origin_regex=".*" if allow_all else None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
