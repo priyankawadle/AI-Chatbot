@@ -39,8 +39,7 @@ apps/backend/__pycache__/
 apps/backend/app/__pycache__/
 
 # --- Docker ---
-**/Dockerfile.*
-**/Dockerfile
+
 docker-compose.override.yml
 *.pid
 *.sock
