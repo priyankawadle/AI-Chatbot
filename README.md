@@ -1,3 +1,12 @@
+---
+title: AI ChatBot
+emoji: "\U0001F916"
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
 # AI-Powered Customer Support Bot (RAG + Intent)
 
 ## 1) what this solves
