@@ -1,3 +1,12 @@
+﻿---
+title: AI ChatBot
+emoji: "\U0001F916"
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
 # AI-Powered Customer Support Bot (RAG + Intent)
 
 ## Objective
@@ -59,19 +68,7 @@ Add `-v "$(pwd)/data:/app/data"` to persist SQLite/Qdrant data across runs.
 ## Deploy to Hugging Face Spaces (Docker)
 1) Create a new Space and choose SDK **Docker**.
 2) Push this repo to the Space (keep `Dockerfile` and `entrypoint.sh`).
- - git clone https://github.com/<username>/<repo-name>.git
- - cd <repo-name>
- - git remote add hf https://huggingface.co/spaces/<username>/<space-name>
- - git remote -v
- - git add .
- - git commit -m "Update app"
- - git push origin main  
- - git push hf main       
-
-3) In Space **Secrets**, set at minimum `OPENAI_API_KEY`. Optional overrides: `JWT_SECRET`, `ALLOWED_ORIGINS`, `DB_DRIVER`/   `DB_*` (for Postgres), `QDRANT_URL` (for managed Qdrant), `API_BASE` (if you front the API differently).
+3) In Space **Secrets**, set at minimum `OPENAI_API_KEY`. Optional overrides: `JWT_SECRET`, `ALLOWED_ORIGINS`, `DB_DRIVER`/`DB_*` (for Postgres), `QDRANT_URL` (for managed Qdrant), `API_BASE` (if you front the API differently).
 4) Build/launch: Spaces builds the Docker image, then `entrypoint.sh` starts FastAPI on `0.0.0.0:8000` and Streamlit on `0.0.0.0:7860`. With no overrides, it uses SQLite at `/app/data/app.db` and embedded Qdrant at `/app/data/qdrant`.
 
-Defaults for Spaces:
-* DB: SQLite at `/app/data/app.db` (set `DB_DRIVER=postgres` plus connection envs if you prefer Postgres).
-* Vectors: embedded Qdrant at `/app/data/qdrant` (set `QDRANT_URL` to point at a managed Qdrant instead).
-* CORS: `ALLOWED_ORIGINS="*"` unless you override via env.
+
