@@ -1,340 +1,75 @@
----
-title: AI ChatBot
-emoji: "\U0001F916"
-colorFrom: blue
-colorTo: green
-sdk: docker
-pinned: false
----
-
 # AI-Powered Customer Support Bot (RAG + Intent)
 
-## 1) what this solves
-
-* ❓ Users repeat the same questions → long queues, SLA breaches.
-* 🧭 Agents struggle to find the right answer across PDFs/KB/Confluence.
-* 🌍 Need multilingual answers without rewriting the KB.
-
-**Outcomes**
-
-* Deflect 40–70% of L1 tickets.
-* Faster first response/ resolution (FRT/MTTR).
-* Structured insights on “what users ask” → better docs and product.
-
-## 2) who uses it
-
-* External customers (website widget, in-app help).
-* Internal support agents (agent-assist sidebar).
-* Success/Docs teams (analytics to improve FAQs).
-
-## 3) top use cases
-
-* FAQ/How-to answers (“reset password”, “invoice download”).
-* Order/account lookups via secure backend calls.
-* Policy/plan comparisons (grounded in your docs).
-* Handover to human with full conversation + retrieval trace.
-
-## 4) architecture (high level)
-
-```
-[Client Widget/Chat UI]
-        |
-   [FastAPI API Gateway]
-        |
-   ┌─────────── Core Services ───────────┐
-   | [Intent Classifier]                 |
-   | [RAG Orchestrator]                  |
-   |  - Retrievers (BM25 + Vectors)      |
-   |  - Re-ranking (optional)            |
-   |  - Answer Synth + Citations         |
-   | [Tools/Actions] (Order, Reset, etc) |
-   └─────────────────────────────────────┘
-        |
-[Postgres/Mongo]  [Vector DB (Qdrant/PGVector)]
-        |
- [Document Ingestion + Embeddings Pipeline]
-        |
-     [Admin Console + Analytics]
-```
-
-## 5) tech stack (pragmatic picks)
-
-* **Backend API**: Python **FastAPI** (typed, async, great perf), Pydantic, Uvicorn/Gunicorn.
-* **RAG**: LlamaIndex or LangChain (pick one), **Qdrant** or PostgreSQL + **pgvector**.
-* **Embeddings**: text-embedding-3-large (or local bge-m3 if strictly OSS).
-* **LLM**: gpt-4.1-mini (cost/quality sweet spot) or OSS (Llama-3.1-8B) for private.
-* **Intent classification**:
-
-  * v1: Lightweight zero-shot (LLM prompt) + rules.
-  * v2: Fine-tuned small model (scikit-learn or fastText) if volume justifies.
-* **DB**:
-
-  * Choose **Postgres** if you want joins + analytics + pgvector.
-  * Choose **MongoDB** if you prefer schemaless docs. (I’d do **Postgres + pgvector**.)
-* **UI**:
-
-  * MVP: **Gradio/Streamlit** (ship fast).
-  * Prod: Your **React** skills for a polished web widget + agent console.
-* **Auth & Secrets**: OAuth/JWT, AWS Secrets Manager.
-* **Infra**: Docker, docker-compose; then AWS ECS/EKS or Azure Container Apps.
-* **MLOps**: Prefect/Celery (ingestion), MLflow for model versions, OpenTelemetry + Prometheus/Grafana for traces/metrics.
-* **i18n**: translation API (batch translate KB once) + on-the-fly translate user query/answer (v1).
-
-## 6) data model (Postgres example)
-
-**Tables**
-
-* `faq(doc_id, title, body_md, url, language, source, updated_at)`
-* `embedding(doc_id, chunk_id, vector, text, metadata jsonb)`
-* `conversation(id, user_id, channel, created_at)`
-* `message(id, conversation_id, role, text, intent, answer_latency_ms, created_at)`
-* `retrieval_log(message_id, doc_id, score, rerank_score, chunk_preview)`
-* `action_log(message_id, action_name, status, payload jsonb)`
-* `feedback(message_id, rating int, comment text)`
-
-## 7) RAG flow (how answers are produced)
-
-1. **Detect intent** (billing, technical, account, small-talk).
-2. **If action needed** (e.g., “reset password”), call a tool (secure backend API).
-3. **Else**: build a search query → hybrid retrieval (BM25 + vector).
-4. **Optional**: rerank top-k with a cross-encoder (bge-reranker).
-5. **Synthesize** answer with **citations** and safety guardrails.
-6. **Translate** output to user’s language (if needed).
-7. **Log** conversation + retrieval trace; collect feedback.
-
-## 8) multilingual strategy
-
-* v1: On-the-fly translate (user→EN, answer→user_lang).
-* v2: Pre-translate the KB to top N languages and **embed per-language** for better retrieval quality.
-
-## 9) quality guardrails & metrics
-
-* **Hallucination control**: “answer only from sources; if unsure → ask to clarify or escalate.”
-* **Citations**: show top 2–3 sources.
-* **PII/PIB/Security**: redaction + allowlist tools only.
-* **KPIs**: deflection rate, CSAT/Thumbs-up, avg FRT, answer groundedness (manual audits), coverage per intent.
-
-## 10) implementation plan (solo dev, realistic)
-
-**Total**: ~3–5 weeks for a strong MVP you can demo; 8–10 weeks to polish, scale, and add analytics.
-
-### Phase 0 (Day 0. repo + scaffolding) — 0.5 week
-
-* Monorepo or 2 repos:
-
-  * `support-bot-api` (FastAPI)
-  * `support-bot-ui` (Streamlit/React)
-* Docker, pre-commit (ruff, black, mypy), pytest, Makefile, CI.
-
-### Phase 1 (Ingestion & Vectorization) — 1 week
-
-* Markdown/HTML/PDF loaders (docs, Zendesk exports, Confluence pages).
-* Chunking (by headings + tokens ~512–1024).
-* Embeddings + upsert to pgvector/Qdrant.
-* Re-ingest on file change; hash-based dedupe.
-* Admin CLI to list sources, stats.
-
-### Phase 2 (RAG API + Intent) — 1–1.5 weeks
-
-* `/chat` endpoint:
-
-  * classify intent (LLM zero-shot + small rules).
-  * retrieval (hybrid), optional rerank, synthesize with citations.
-  * guardrails + escalation message when low confidence.
-* Tools/actions framework (dependency-injected functions; e.g., `get_order_status(order_id)`).
-* Logging tables + OpenTelemetry traces.
-
-### Phase 3 (UI + Feedback) — 0.5–1 week
-
-* MVP chat (Streamlit/Gradio) + thumbs up/down + view citations.
-* Simple React widget (optional) to embed on any site.
-* Feedback endpoint wires to `feedback` table.
-
-### Phase 4 (Multilingual + Analytics) — 0.5–1 week
-
-* Translate user input/output (LangChain translation or API).
-* Basic analytics dashboard (queries by intent, deflection, top missing docs).
-
-### Phase 5 (Hardening) — 1 week
-
-* Tests (≥85% coverage on orchestrator & retriever), load test, rate limiting.
-* Secrets, authn (JWT), org-tenant scoping.
-* Helm charts or ECS task defs; staging + prod configs.
-
-> If you only have **nights/weekends**, double the durations.
-
-## 11) minimal API contract (FastAPI)
-
-* `POST /chat` → `{messages:[...], lang?: "en", user_id, org_id}` → `{answer, citations, intent, took_ms, trace_id}`
-* `POST /feedback` → `{message_id, rating, comment}`
-* `POST /ingest` (admin) → upload docs or URLs
-* `GET /analytics/summary` (admin)
-
-## 12) intent classifier (v1 → v2)
-
-* **v1**: LLM prompt (few-shot) + fallback to regex rules for high-precision intents (billing, status).
-* **v2**: Train a small supervised model: `scikit-learn` (linear SVM/LogReg) on labeled transcripts; export with joblib; integrate as first step (fast & cheap).
-
-## 13) retrieval recipe (solid defaults)
-
-* Hybrid: `BM25 (pg_trgm or Elastic)` + `vector(top_k=30)` → **merge + dedupe** → **rerank top 8** → context window.
-* Chunk size 700–900 tokens with 10–20% overlap.
-* Store **title, section path, url** for clean citations.
-
-## 14) security & data privacy (must-haves)
-
-* Tenant isolation (org_id everywhere).
-* PII masking in logs.
-* Tooling uses allowlisted backends; never accept tool names from user content.
-* Per-org limits & rate limiting (slow-loris protection).
-
-## 15) evaluation & acceptance criteria
-
-* ≥60% deflection on seeded FAQ set.
-* ≥0.8 groundedness (manual rubric) on 50 sampled answers.
-* ≤2s p95 for retrieval + answer stub (stream output early).
-* Zero critical security findings from a basic threat model.
-
-## 16) repo structure (suggested)
-
-```
-support-bot-api/
-  app/
-    main.py
-    deps.py
-    routers/
-      chat.py
-      admin.py
-      feedback.py
-    core/
-      settings.py
-      logging.py
-    rag/
-      ingest.py
-      retriever.py
-      rerank.py
-      orchestrator.py
-      tools.py
-      prompts.py
-    ml/
-      intent_zero_shot.py
-      intent_model.py
-    db/
-      models.py
-      schemas.py
-      migrations/
-  tests/
-  Dockerfile
-  pyproject.toml
-support-bot-ui/  (Streamlit or React)
-```
-
-## 17) nice-to-have add-ons
-
-* **Agent assist** mode (shows top docs + macro suggestions).
-* **Workflow actions** (refund, generate ticket) with confirmations.
-* **Grounded extractive answers** toggle (span extraction vs generative).
-
-## 18) risks & mitigations
-
-* **Hallucination** → strict “answer-from-context” prompts, show citations, low-confidence escalate.
-* **Doc drift** → nightly re-ingestion, checksum checks.
-* **Latency** → cache embeddings, pre-compute BM25 index, stream tokens.
-* **Multilingual recall** → per-language embeddings in v2.
-
----
-
-## your learning path (hands-on)
-
-**Week 1**
-
-* Stand up FastAPI + pgvector locally (docker-compose).
-* Implement ingestion for Markdown & URLs. Create embeddings, query via `top_k`.
-
-**Week 2**
-
-* Build `/chat`: hybrid retrieval + simple LLM answer + citations.
-* Add thumbs feedback + logging.
-
-**Week 3**
-
-* Add intent (zero-shot), one secure tool (mock `get_order_status`).
-* Ship Streamlit UI; record a demo.
-
-**Week 4**
-
-* Add translation, analytics page, tests + CI, basic load test.
-* Optional: swap Streamlit → React widget.
-
-<!-- 
-//to up both FE & BE
-docker compose build
-docker compose up 
-
-//to create requirement file
-pip freeze > requirements.txt
-
-//.venv activate
-cd C:\Projects\Priyanka\AI-Customer-Support-Chatbot\apps\backend
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.venv\Scripts\activate
-$env:DATABASE_URL = "sqlite:///./local.db"
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reloa
--->
-
-
-
-<!-- //Start Postgres docker -->
-cd AI-Customer-Support-Chatbot
-docker ps -a
-docker rm some-postgres
-<!-- //TO CREATE POSGRES CONTAINER -->
-docker run -d --name some-postgres `
-  -e POSTGRES_PASSWORD=mysecretpassword `
-  -e POSTGRES_USER=postgres `
-  -e POSTGRES_DB=postgres `
-  -p 5432:5432 `
-  -v pg_data:/var/lib/postgresql/data `
-  postgres:16 
-<!-- //TO RUN POSTGRES CONTAINER -->
-  docker start chatbot-postgres
-
-
-<!-- //CREATE QDRANT CONATINER -->
-docker run -p 6333:6333 qdrant/qdrant
-
-<!-- // TO START QRANT CONTAINER -->
-docker start chatbot-qdrant
- 
-
-
-<!-- BACKEND START -->
-cd apps/backend     
-.venv\Scripts\activate        
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
- 
-
-
-<!-- //FRONTEND START -->
-cd apps/streamlit-app  
-.venv\Scripts\activate 
-streamlit run streamlit_app.py   
-
-<!-- remove .venv and install again -->
-AI-Chatbot\apps\streamlit-app> deactivate
-Remove-Item -Recurse -Force .venv
+## Objective
+- Provide a retrieval-augmented chatbot that answers customer/support questions grounded in your docs.
+- Combine a FastAPI backend (ingestion, intent, retrieval, chat endpoints) with a Streamlit chat UI.
+- Ship as a single Docker image ready for local use or Hugging Face Spaces.
+
+## Project structure
+- apps/backend/app/main.py: FastAPI application entrypoint and router wiring.
+- apps/backend/app/services/: ingestion, chunking, embedding, and Qdrant helpers.
+- apps/backend/app/db/: schema + connection helpers (SQLite by default; Postgres supported).
+- apps/backend/data/app.db: default SQLite database path for local/Space runs.
+- apps/streamlit-app/streamlit_app.py: Streamlit UI entrypoint.
+- apps/streamlit-app/frontend/: shared UI state, models, and API helpers.
+- Dockerfile: builds backend + Streamlit in one image (used locally and on Spaces).
+- entrypoint.sh: starts uvicorn on 8000 and Streamlit on 7860 inside the container.
+
+## Tech stack
+- Backend: Python 3.10, FastAPI, Pydantic, psycopg2/SQLite, Qdrant client.
+- Retrieval: OpenAI chat + embeddings (pluggable), hybrid chunking, embedded or remote Qdrant vector store.
+- Frontend: Streamlit chat UI with history and file upload hooks.
+- Infra: Docker-based build; environment-driven config via `.env` files or Space secrets.
+
+## Run locally (no Docker)
+1) Prereqs: Python 3.10+, optional Docker if you prefer Postgres/Qdrant containers. For quickest start, set `DB_DRIVER=sqlite` to use the bundled file DB and embedded Qdrant.
+2) Install deps:
+```bash
 python -m venv .venv
 .\.venv\Scripts\activate
+pip install -r apps/backend/requirements.txt -r apps/streamlit-app/requirements.txt
+```
+3) Configure envs (do not commit secrets):
+   - `apps/backend/.env`: `DB_DRIVER=sqlite`, `SQLITE_PATH=./apps/backend/data/app.db`, `QDRANT_PATH=./apps/backend/data/qdrant`, `OPENAI_API_KEY=<your key>`, optional `QDRANT_URL`/Postgres settings.
+   - `apps/streamlit-app/.env`: `API_BASE=http://127.0.0.1:8000`, `OPENAI_API_KEY=<your key>`, `OPENAI_MODEL=<chat model>`, `OPENAI_EMBED_MODEL=<embed model>`, optional `QDRANT_*` overrides.
+4) (Optional) Remote Qdrant instead of embedded:
+```bash
+docker run -p 6333:6333 qdrant/qdrant
+# set QDRANT_URL=http://localhost:6333 in both env files
+```
+5) Start the backend:
+```bash
+uvicorn app.main:app --app-dir apps/backend --host 127.0.0.1 --port 8000 --reload
+```
+6) Start the Streamlit UI:
+```bash
+API_BASE=http://127.0.0.1:8000 streamlit run apps/streamlit-app/streamlit_app.py --server.address 127.0.0.1 --server.port 7860
+```
+Visit http://127.0.0.1:7860 to chat.
 
-## Hugging Face Space (Docker) quick start
+## Docker (local) run
+```bash
+docker build -t ai-chatbot .
+docker run -p 8000:8000 -p 7860:7860 \
+  -e OPENAI_API_KEY=<your key> \
+  ai-chatbot
+```
+Add `-v "$(pwd)/data:/app/data"` to persist SQLite/Qdrant data across runs.
 
-This repo now ships with a Dockerfile + entrypoint wired for Hugging Face Spaces. The container runs FastAPI on port 8000 (SQLite + embedded Qdrant) and Streamlit on the public port 7860.
+## Deploy to Hugging Face Spaces (Docker)
+1) Create a new Space and choose SDK **Docker**.
+2) Push this repo to the Space (keep `Dockerfile` and `entrypoint.sh`).
+ - git clone https://github.com/<username>/<repo-name>.git
+ - cd <repo-name>
+ - git remote add hf https://huggingface.co/spaces/<username>/<space-name>
+ - git remote -v
+ - git add .
+ - git commit -m "Update app"
+ - git push origin main  
+ - git push hf main       
 
-Steps:
-1) Create a new Space on Hugging Face with SDK set to **Docker**.
-2) Push this repo to the Space (include `Dockerfile` and `entrypoint.sh`).
-3) In the Space settings, add secrets: at minimum `OPENAI_API_KEY`; optional `JWT_SECRET`, `ALLOWED_ORIGINS`, and `QDRANT_URL` if you want a remote Qdrant instead of the embedded store.
-4) Build will install both backend and Streamlit requirements, then start uvicorn (0.0.0.0:8000) and Streamlit (0.0.0.0:7860). The frontend talks to the backend at `http://127.0.0.1:8000` via `API_BASE`.
+3) In Space **Secrets**, set at minimum `OPENAI_API_KEY`. Optional overrides: `JWT_SECRET`, `ALLOWED_ORIGINS`, `DB_DRIVER`/   `DB_*` (for Postgres), `QDRANT_URL` (for managed Qdrant), `API_BASE` (if you front the API differently).
+4) Build/launch: Spaces builds the Docker image, then `entrypoint.sh` starts FastAPI on `0.0.0.0:8000` and Streamlit on `0.0.0.0:7860`. With no overrides, it uses SQLite at `/app/data/app.db` and embedded Qdrant at `/app/data/qdrant`.
 
 Defaults for Spaces:
 * DB: SQLite at `/app/data/app.db` (set `DB_DRIVER=postgres` plus connection envs if you prefer Postgres).
