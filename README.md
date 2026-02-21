@@ -36,10 +36,13 @@ pinned: false
 ```bash
 python -m venv .venv
 .\.venv\Scripts\activate
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
 pip install -r apps/backend/requirements.txt -r apps/streamlit-app/requirements.txt
 ```
 3) Configure envs (do not commit secrets):
    - `apps/backend/.env`: `DB_DRIVER=sqlite`, `SQLITE_PATH=./apps/backend/data/app.db`, `QDRANT_PATH=./apps/backend/data/qdrant`, `OPENAI_API_KEY=<your key>`, optional `QDRANT_URL`/Postgres settings.
+   
    - `apps/streamlit-app/.env`: `API_BASE=http://127.0.0.1:8000`, `OPENAI_API_KEY=<your key>`, `OPENAI_MODEL=<chat model>`, `OPENAI_EMBED_MODEL=<embed model>`, optional `QDRANT_*` overrides.
 4) (Optional) Remote Qdrant instead of embedded:
 ```bash
@@ -48,11 +51,14 @@ docker run -p 6333:6333 qdrant/qdrant
 ```
 5) Start the backend:
 ```bash
+$env:OPENAI_API_KEY = "sk-"
+
 uvicorn app.main:app --app-dir apps/backend --host 127.0.0.1 --port 8000 --reload
 ```
 6) Start the Streamlit UI:
 ```bash
-API_BASE=http://127.0.0.1:8000 streamlit run apps/streamlit-app/streamlit_app.py --server.address 127.0.0.1 --server.port 7860
+$env:API_BASE = "http://127.0.0.1:8000"
+streamlit run apps/streamlit-app/streamlit_app.py --server.address 127.0.0.1 --server.port 7860
 ```
 Visit http://127.0.0.1:7860 to chat.
 

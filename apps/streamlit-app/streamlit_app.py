@@ -78,6 +78,6 @@ with top_col2:
 # ---------- Steps ----------
 if role == "admin":
     render_upload_step(active_conv)
-    st.info("You are in admin mode. Upload files for users; chat is disabled in this view.")
+
 else:
     render_chat_step()

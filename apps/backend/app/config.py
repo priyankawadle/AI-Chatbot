@@ -12,14 +12,12 @@ from dotenv import load_dotenv
 # Load values from a .env file sitting in the project root
 load_dotenv()
 
-# Database settings
-DB_DRIVER = os.getenv("DB_DRIVER", "postgres").lower()
+# PostgreSQL connection settings (loaded from .env)
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = int(os.getenv("DB_PORT", "5432"))
-DB_NAME = os.getenv("DB_NAME", "postgres")
+DB_NAME = os.getenv("DB_NAME", "ai-chatbot-db")
 DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "mysecretpassword")
-SQLITE_PATH = os.getenv("SQLITE_PATH", str(Path("data") / "app.db"))
+DB_PASSWORD = os.getenv("DB_PASSWORD", "Postgres@123")
 
 # Qdrant (vector database) settings
 QDRANT_URL = os.getenv("QDRANT_URL")  # If unset, we'll use embedded mode

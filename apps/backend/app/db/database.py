@@ -1,133 +1,143 @@
 """
-Connection helpers shared by FastAPI dependencies.
-Supports both Postgres (via psycopg2 pool) and SQLite (single-file, good for Spaces).
+Database connection management using psycopg (psycopg3) and a connection pool.
+
+This module is the single place responsible for:
+  - Building the PostgreSQL connection string from environment config.
+  - Creating and tearing down a ConnectionPool (shared across the app).
+  - Providing a FastAPI dependency (get_db_conn) that hands a connection to
+    each request and returns it to the pool when the request finishes.
+
+All queries use the standard PostgreSQL parameterized placeholder: %s
 """
-import sqlite3
+
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Generator, Optional
+
+import psycopg                          # psycopg3 – PostgreSQL driver
+from psycopg_pool import ConnectionPool  # psycopg3 async-compatible pool
 
 from fastapi import HTTPException
 
 from app.config import (
-    DB_DRIVER,
     DB_HOST,
     DB_NAME,
     DB_PASSWORD,
     DB_PORT,
     DB_USER,
-    SQLITE_PATH,
 )
 from app.db.schema import ensure_tables
 
-try:
-    from psycopg2 import OperationalError
-    from psycopg2.pool import SimpleConnectionPool
-except Exception:  # pragma: no cover - psycopg2 may be absent in SQLite-only mode
-    OperationalError = Exception  # type: ignore
-    SimpleConnectionPool = None  # type: ignore
+# ---------------------------------------------------------------------------
+# Parameterized query placeholder for PostgreSQL
+# Referenced in user_repository.py so both files stay in sync automatically.
+# ---------------------------------------------------------------------------
+DB_PLACEHOLDER = "%s"
+
+# ---------------------------------------------------------------------------
+# PostgreSQL connection string assembled from .env values
+# ---------------------------------------------------------------------------
+_CONNINFO = (
+    f"host={DB_HOST} "
+    f"port={DB_PORT} "
+    f"dbname={DB_NAME} "
+    f"user={DB_USER} "
+    f"password={DB_PASSWORD} "
+    f"connect_timeout=5"
+)
+
+# Global pool – None until init_pool() is called on application startup
+pool: Optional[ConnectionPool] = None
 
 
-IS_SQLITE = DB_DRIVER == "sqlite"
-DB_PLACEHOLDER = "?" if IS_SQLITE else "%s"
-
-pool: Optional[SimpleConnectionPool] = None  # Postgres pool
-sqlite_db_path = Path(SQLITE_PATH)
-
+# ---------------------------------------------------------------------------
+# Cursor context manager
+# ---------------------------------------------------------------------------
 
 @contextmanager
 def db_cursor(conn):
     """
-    Context manager that works for both psycopg2 and sqlite3 cursors.
+    Thin context manager that opens a psycopg cursor and closes it on exit.
+
+    Usage:
+        with db_cursor(conn) as cur:
+            cur.execute("SELECT 1;")
+            row = cur.fetchone()
     """
     cur = conn.cursor()
     try:
         yield cur
     finally:
-        try:
-            cur.close()
-        except Exception:
-            pass
+        cur.close()
 
 
-def _init_sqlite() -> None:
-    """
-    Ensure SQLite database file exists and schema is created.
-    A new connection is opened per request (see get_db_conn).
-    """
-    sqlite_db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(sqlite_db_path, check_same_thread=False)
-    try:
-        conn.execute("PRAGMA foreign_keys = ON;")
-        ensure_tables(conn, dialect="sqlite")
-    finally:
-        conn.close()
-
+# ---------------------------------------------------------------------------
+# Pool lifecycle – hooked into FastAPI startup / shutdown events in main.py
+# ---------------------------------------------------------------------------
 
 def init_pool() -> None:
-    """Bootstrap DB connectivity (pool for Postgres, file for SQLite)."""
+    """
+    Create the PostgreSQL connection pool and verify connectivity.
+
+    Called once at application startup (main.py @app.on_event("startup")).
+    Passes open=True so the pool opens real connections immediately; this
+    surfaces misconfigured credentials / unreachable host at boot time rather
+    than silently failing on the first request.
+
+    Also runs ensure_tables() to create schema objects that do not yet exist.
+    """
     global pool
-    if IS_SQLITE:
-        _init_sqlite()
-        return
 
-    if pool:
-        return
-    if SimpleConnectionPool is None:
-        raise HTTPException(status_code=500, detail="psycopg2 not installed for Postgres mode")
+    if pool is not None:
+        return  # Already initialized – idempotent
 
-    pool = SimpleConnectionPool(
-        minconn=1,
-        maxconn=5,
-        host=DB_HOST,
-        port=DB_PORT,
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        connect_timeout=5,
+    pool = ConnectionPool(
+        conninfo=_CONNINFO,
+        min_size=1,   # Keep at least one connection alive at all times
+        max_size=5,   # Cap concurrent connections to avoid overloading Postgres
+        open=True,    # Open connections eagerly so startup fails fast on errors
     )
 
-    # Quick ping + ensure base schema
-    conn = pool.getconn()
-    try:
-        with db_cursor(conn) as cur:
-            cur.execute("SELECT 1;")
-            cur.fetchone()
-        ensure_tables(conn, dialect="postgres")
-    finally:
-        pool.putconn(conn)
+    # Ping the database and bootstrap the schema in a single borrowed connection
+    with pool.connection() as conn:
+        conn.execute("SELECT 1;")   # Lightweight liveness check
+        ensure_tables(conn)          # CREATE TABLE IF NOT EXISTS for all tables
 
 
 def close_pool() -> None:
-    """Close pooled connections when the app stops."""
+    """
+    Close all pooled connections gracefully.
+
+    Called once at application shutdown (main.py @app.on_event("shutdown")).
+    """
     global pool
-    if IS_SQLITE:
-        return
-    if pool:
-        pool.closeall()
+
+    if pool is not None:
+        pool.close()
         pool = None
 
 
+# ---------------------------------------------------------------------------
+# FastAPI dependency
+# ---------------------------------------------------------------------------
+
 def get_db_conn() -> Generator:
     """
-    FastAPI dependency that hands out a connection.
-    For SQLite we open/close per request; for Postgres we borrow from the pool.
-    """
-    global pool
-    if IS_SQLITE:
-        conn = sqlite3.connect(sqlite_db_path, check_same_thread=False)
-        conn.execute("PRAGMA foreign_keys = ON;")
-        try:
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
-        return
+    FastAPI dependency that yields a pooled PostgreSQL connection per request.
 
+    The connection is borrowed from the pool at the start of the request and
+    automatically returned (with commit or rollback) when the request ends.
+
+    Inject it into a route handler like this:
+        @router.get("/example")
+        def example(conn = Depends(get_db_conn)):
+            with db_cursor(conn) as cur:
+                cur.execute("SELECT 1;")
+    """
     if pool is None:
-        raise HTTPException(status_code=500, detail="DB pool not initialized")
-    conn = pool.getconn()
-    try:
+        raise HTTPException(status_code=500, detail="Database pool is not initialized")
+
+    # pool.connection() is a context manager:
+    #   __enter__  → checks out a connection from the pool
+    #   __exit__   → commits on success, rolls back on exception, returns conn
+    with pool.connection() as conn:
         yield conn
-    finally:
-        pool.putconn(conn)

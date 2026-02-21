@@ -83,8 +83,7 @@ def render_upload_step(active_conv):
 
     if not st.session_state.file_id:
         st.info(
-            "Please upload a file for this chat. Once it is processed, "
-            "you can start asking questions about its content."
+            "Please upload a file here."
         )
 
 

@@ -1,4 +1,15 @@
-"""Routes for uploading and chunking documents."""
+"""
+Routes for uploading and chunking documents.
+
+Files are:
+  1. Validated (type + size).
+  2. Text-extracted (plain text or PDF).
+  3. Chunked into smaller segments.
+  4. Embedded via OpenAI.
+  5. Stored as metadata + chunks in PostgreSQL.
+  6. Indexed as vectors in Qdrant for semantic search.
+"""
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
 from qdrant_client.http import models as qmodels
@@ -8,7 +19,7 @@ from app.config import (
     SUPPORTED_EXTENSIONS,
     QDRANT_COLLECTION_NAME,
 )
-from app.db.database import DB_PLACEHOLDER, IS_SQLITE, db_cursor, get_db_conn
+from app.db.database import db_cursor, get_db_conn
 from app.services.chunking import chunk_text
 from app.services.embeddings import embed_texts
 from app.services.pdf_processing import extract_text_from_pdf
@@ -23,8 +34,7 @@ async def upload_file(
     conn=Depends(get_db_conn),
 ):
     """
-    Upload a file (.txt or .pdf), create text chunks, embed them,
-    store metadata & chunks in Postgres, and embeddings in Qdrant.
+    Upload a .txt or .pdf file, extract text, embed chunks, and store everything.
 
     Returns:
         {
@@ -33,7 +43,7 @@ async def upload_file(
             "chunks_stored": <int>
         }
     """
-    # 1) Basic validation
+    # 1) Basic validation – ensure a filename was provided
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -48,7 +58,7 @@ async def upload_file(
         )
 
     try:
-        # 2) Read file content into memory
+        # 2) Read the entire file into memory
         raw_bytes = await file.read()
         size_bytes = len(raw_bytes)
 
@@ -58,7 +68,7 @@ async def upload_file(
                 detail="Uploaded file is empty.",
             )
 
-        # 3) Decode / extract text based on file type
+        # 3) Extract plain text depending on file type
         if filename_lower.endswith(".txt"):
             text_content = raw_bytes.decode("utf-8", errors="ignore").strip()
         else:  # .pdf
@@ -70,7 +80,7 @@ async def upload_file(
                 detail="No readable text found in the uploaded file.",
             )
 
-        # 4) Chunk text
+        # 4) Split the extracted text into overlapping chunks
         chunks = chunk_text(text_content)
         if not chunks:
             raise HTTPException(
@@ -78,7 +88,7 @@ async def upload_file(
                 detail="Uploaded file is empty or could not be parsed into chunks.",
             )
 
-        # 5) Generate embeddings
+        # 5) Generate vector embeddings for every chunk via OpenAI
         embeddings = embed_texts(chunks)
         if len(embeddings) != len(chunks):
             raise HTTPException(
@@ -86,47 +96,45 @@ async def upload_file(
                 detail="Failed to generate embeddings for all chunks.",
             )
 
-        # 6) Store file metadata + chunks in Postgres/SQLite
+        # 6) Persist file metadata and chunks in PostgreSQL
         try:
             with db_cursor(conn) as cur:
-                # Insert file metadata
-                insert_meta_sql = f"""
-                    INSERT INTO uploaded_files (filename, content_type, size_bytes)
-                    VALUES ({DB_PLACEHOLDER}, {DB_PLACEHOLDER}, {DB_PLACEHOLDER})
-                """
-                if not IS_SQLITE:
-                    insert_meta_sql += " RETURNING id;"
-                else:
-                    insert_meta_sql += ";"
-
+                # Insert file metadata and retrieve the generated id in one step
                 cur.execute(
-                    insert_meta_sql,
+                    """
+                    INSERT INTO uploaded_files (filename, content_type, size_bytes)
+                    VALUES (%s, %s, %s)
+                    RETURNING id;
+                    """,
                     (
                         file.filename,
                         file.content_type or "application/octet-stream",
                         size_bytes,
                     ),
                 )
-                file_id = cur.lastrowid if IS_SQLITE else (cur.fetchone() or [None])[0]
+                row = cur.fetchone()
+                file_id = row[0] if row else None
+
                 if not file_id:
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail="Failed to persist file metadata.",
                     )
 
-                # Insert chunks; if you need chunk_ids, collect them here
-                insert_chunk_sql = f"""
-                    INSERT INTO file_chunks (file_id, chunk_index, content)
-                    VALUES ({DB_PLACEHOLDER}, {DB_PLACEHOLDER}, {DB_PLACEHOLDER});
-                """
+                # Insert every text chunk linked to the file
                 for idx, chunk in enumerate(chunks):
                     cur.execute(
-                        insert_chunk_sql,
+                        """
+                        INSERT INTO file_chunks (file_id, chunk_index, content)
+                        VALUES (%s, %s, %s);
+                        """,
                         (file_id, idx, chunk),
                     )
+
             conn.commit()
+
         except HTTPException:
-            raise
+            raise  # Let FastAPI-controlled errors propagate as-is
         except Exception as db_exc:
             conn.rollback()
             raise HTTPException(
@@ -134,9 +142,10 @@ async def upload_file(
                 detail=f"Failed to store file or chunks: {db_exc}",
             )
 
-        # 7) Store embeddings in Qdrant
+        # 7) Index the chunk embeddings in Qdrant for semantic search
         points = []
         for idx, (chunk_text_value, vector) in enumerate(zip(chunks, embeddings)):
+            # Deterministic point id: file_id * large_offset + chunk_index
             point_id = file_id * MAX_CHUNKS_PER_FILE + idx
             points.append(
                 qmodels.PointStruct(
@@ -156,7 +165,7 @@ async def upload_file(
             points=points,
         )
 
-        # 8) Success response
+        # 8) Return a success summary
         return JSONResponse(
             status_code=status.HTTP_201_CREATED,
             content={
@@ -167,11 +176,10 @@ async def upload_file(
         )
 
     except HTTPException:
-        # Re-raise FastAPI-controlled errors
-        raise
+        raise  # Re-raise FastAPI errors unchanged
     except Exception as exc:
-        # Generic failure path
-        # TODO: Optionally delete partial DB rows / Qdrant points to keep things consistent.
+        # Catch-all for unexpected failures
+        # TODO: delete partial DB rows / Qdrant points to keep state consistent
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to upload file: {exc}",
@@ -181,8 +189,9 @@ async def upload_file(
 @router.get("/history")
 async def list_uploaded_files(conn=Depends(get_db_conn)):
     """
-    Return a list of previously uploaded files with basic metadata + chunk counts.
-    Used by the Streamlit sidebar history to populate file pickers.
+    Return a list of previously uploaded files with metadata and chunk counts.
+
+    Used by the Streamlit sidebar to populate the file-history picker.
     """
     try:
         with db_cursor(conn) as cur:
@@ -211,7 +220,10 @@ async def list_uploaded_files(conn=Depends(get_db_conn)):
     files = []
     for row in rows:
         created_at = row[4]
-        created_at_str = created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
+        # PostgreSQL returns a datetime object; convert to ISO string for JSON
+        created_at_str = (
+            created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
+        )
         files.append(
             {
                 "id": row[0],

@@ -23,14 +23,14 @@ hyperframe==6.1.0
 idna==3.11
 jiter==0.12.0
 PyJWT==2.9.0
-numpy==2.2.6
 openai==2.9.0
 pdfminer.six==20231228
 pdfplumber==0.11.4
 pillow==12.0.0
 portalocker==3.2.0
 protobuf==6.33.2
-psycopg2-binary==2.9.11
+psycopg[binary]
+psycopg-pool
 pycparser==2.23
 pydantic==2.12.5
 pydantic_core==2.41.5
