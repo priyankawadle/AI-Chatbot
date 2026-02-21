@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # PostgreSQL connection settings (loaded from .env)
+#TODO: after removing static text like localhost etc , getting error check later
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = int(os.getenv("DB_PORT", "5432"))
 DB_NAME = os.getenv("DB_NAME", "ai-chatbot-db")
@@ -20,7 +21,7 @@ DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "Postgres@123")
 
 # Qdrant (vector database) settings
-QDRANT_URL = os.getenv("QDRANT_URL")  # If unset, defaults to http://localhost:6333
+QDRANT_URL = os.getenv("QDRANT_URL") 
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "supportbot_documents")
 
