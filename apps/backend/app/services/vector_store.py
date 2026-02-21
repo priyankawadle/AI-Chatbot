@@ -16,6 +16,8 @@ from app.config import (
     QDRANT_URL,
 )
 
+print("EMBEDDING_DIM",EMBEDDING_DIM,"QDRANT_API_KEY",QDRANT_API_KEY,
+"QDRANT_COLLECTION_NAME",QDRANT_COLLECTION_NAME,"QDRANT_URL",QDRANT_URL)
 # Fall back to local Docker Qdrant if QDRANT_URL is not explicitly set
 _qdrant_url = QDRANT_URL 
 
