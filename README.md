@@ -71,14 +71,14 @@ docker run -p 6333:6333 qdrant/qdrant
 ```
 5) Start the backend:
 ```bash
-$env:OPENAI_API_KEY = "sk-"
+$env:OPENAI_API_KEY ="sk-"
 
 uvicorn app.main:app --app-dir apps/backend --host 127.0.0.1 --port 8000 --reload
 ```
 6) Start the Streamlit UI:
 ```bash
-$env:API_BASE = "http://127.0.0.1:8000"
-streamlit run apps/streamlit-app/streamlit_app.py --server.address 127.0.0.1 --server.port 7860
+$env:API_BASE = http://127.0.0.1:8000"
+streamlit run apps/streamlit-app/streamlit_app.py --server.adchdress 127.0.0.1 --server.port 7860
 ```
 Visit http://127.0.0.1:7860 to chat.
 
