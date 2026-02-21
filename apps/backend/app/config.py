@@ -20,10 +20,10 @@ DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "Postgres@123")
 
 # Qdrant (vector database) settings
-QDRANT_URL = os.getenv("QDRANT_URL")  # If unset, we'll use embedded mode
+QDRANT_URL = os.getenv("QDRANT_URL")  # If unset, defaults to http://localhost:6333
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "supportbot_documents")
-QDRANT_PATH = os.getenv("QDRANT_PATH", str(Path("data") / "qdrant"))
+
 
 # OpenAI settings
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")

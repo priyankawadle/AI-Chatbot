@@ -67,6 +67,7 @@ pip install -r apps/backend/requirements.txt -r apps/streamlit-app/requirements.
 ```bash
 docker run -p 6333:6333 qdrant/qdrant
 # set QDRANT_URL=http://localhost:6333 in both env files
+# see qdrant point: http://localhost:6333/dashboard
 ```
 5) Start the backend:
 ```bash
