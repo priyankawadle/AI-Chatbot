@@ -23,6 +23,7 @@ from app.db.database import db_cursor, get_db_conn
 from app.services.chunking import chunk_text
 from app.services.embeddings import embed_texts
 from app.services.pdf_processing import extract_text_from_pdf
+from app.services.security import require_admin
 from app.services.vector_store import qdrant_client
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -32,6 +33,7 @@ router = APIRouter(prefix="/files", tags=["files"])
 async def upload_file(
     file: UploadFile = File(...),
     conn=Depends(get_db_conn),
+    current_user: dict = Depends(require_admin),
 ):
     """
     Upload a .txt or .pdf file, extract text, embed chunks, and store everything.

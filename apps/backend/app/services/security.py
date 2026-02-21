@@ -7,6 +7,8 @@ from typing import Optional
 from datetime import datetime, timedelta, timezone
 
 import jwt
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -71,3 +73,54 @@ def decode_token(token: str, expected_type: Optional[str] = None) -> dict:
     if expected_type and data.get("type") != expected_type:
         raise jwt.InvalidTokenError("Incorrect token type")
     return data
+
+
+# HTTP Bearer security scheme
+security = HTTPBearer()
+
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """
+    Extract and validate the JWT token from the Authorization header.
+    Returns the decoded token payload containing user_id, role, and other claims.
+    Raises HTTPException with 401 if token is missing or invalid.
+    """
+    try:
+        token = credentials.credentials
+        payload = decode_token(token, expected_type="access")
+        return {
+            "user_id": payload.get("sub"),
+            "role": payload.get("role", "user"),
+        }
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.InvalidTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication failed",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
+    """
+    Dependency that ensures the current user has admin role.
+    Returns the user dict if authorized, raises 403 otherwise.
+    """
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required for this operation",
+        )
+    return current_user
+
