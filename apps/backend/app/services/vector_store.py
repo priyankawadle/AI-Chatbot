@@ -31,12 +31,15 @@ def ensure_qdrant_collection() -> None:
 
     Called once at application startup (main.py @app.on_event("startup")).
     Uses cosine distance and the embedding dimension defined in config.
+    Creates payload indexes for filtering.
     """
     try:
-        qdrant_client.get_collection(QDRANT_COLLECTION_NAME)
-        # Collection already exists – nothing to do
+        collection = qdrant_client.get_collection(QDRANT_COLLECTION_NAME)
+        # Collection already exists – check if we need to create indexes
+        print(f"✓ Collection '{QDRANT_COLLECTION_NAME}' exists")
     except Exception:
         # Collection missing – create it now
+        print(f"Creating collection '{QDRANT_COLLECTION_NAME}'...")
         qdrant_client.create_collection(
             collection_name=QDRANT_COLLECTION_NAME,
             vectors_config=qmodels.VectorParams(
@@ -44,3 +47,18 @@ def ensure_qdrant_collection() -> None:
                 distance=qmodels.Distance.COSINE,
             ),
         )
+    
+    # Create payload index on file_id for filtering
+    try:
+        qdrant_client.create_payload_index(
+            collection_name=QDRANT_COLLECTION_NAME,
+            field_name="file_id",
+            field_schema=qmodels.PayloadSchemaType.INTEGER,
+        )
+        print(f"✓ Payload index created on 'file_id'")
+    except Exception as e:
+        # Index might already exist
+        if "already exists" in str(e).lower():
+            print(f"✓ Payload index for 'file_id' already exists")
+        else:
+            print(f"Note: Could not create payload index on 'file_id': {e}")

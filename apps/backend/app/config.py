@@ -9,8 +9,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load values from a .env file sitting in the project root
-load_dotenv()
+# Load values from a .env file in the backend directory
+backend_dir = Path(__file__).parent.parent  # apps/backend/
+env_file = backend_dir / ".env"
+load_dotenv(env_file)
 
 # PostgreSQL connection settings (loaded from .env)
 #TODO: after removing static text like localhost etc , getting error check later
