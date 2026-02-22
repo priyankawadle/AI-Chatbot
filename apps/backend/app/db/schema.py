@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS uploaded_files (
     filename     TEXT        NOT NULL,
     content_type TEXT        NOT NULL,
     size_bytes   BIGINT      NOT NULL,
+    file_hash       TEXT UNIQUE,
+    usage_count     BIGINT      NOT NULL DEFAULT 0,
+    last_queried_at TIMESTAMPTZ,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -114,5 +117,14 @@ def ensure_tables(conn) -> None:
         )
         # Backfill: add page_number on older DBs where file_chunks predate page citations.
         cur.execute("ALTER TABLE file_chunks ADD COLUMN IF NOT EXISTS page_number INT;")
+        # Backfill: file upload dedupe + lifecycle stats.
+        cur.execute("ALTER TABLE uploaded_files ADD COLUMN IF NOT EXISTS file_hash TEXT;")
+        cur.execute(
+            "ALTER TABLE uploaded_files ADD COLUMN IF NOT EXISTS usage_count BIGINT NOT NULL DEFAULT 0;"
+        )
+        cur.execute("ALTER TABLE uploaded_files ADD COLUMN IF NOT EXISTS last_queried_at TIMESTAMPTZ;")
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_uploaded_files_file_hash_unique ON uploaded_files(file_hash);"
+        )
 
     conn.commit()

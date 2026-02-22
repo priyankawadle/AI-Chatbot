@@ -17,8 +17,8 @@ Based on your current app (auth + roles, admin upload, RAG chat across all docs,
 - Return retrieval score summary (top score, chunks used) and show “low confidence” warning when weak matches occur.
 - This builds trust and helps users rephrase when the system is uncertain.
 
-5. **Admin document management panel**
-- Add file delete/re-index/view stats (chunks, upload date, usage count, last queried).
+5. **Admin document management panel** --> DONE
+- Add file delete/view stats (chunks, upload date, usage count, last queried).
 - Right now uploads are list-only; lifecycle management becomes important as your corpus grows.
 
 5. **Hybrid retrieval (semantic + keyword/BM25)**

@@ -1,6 +1,7 @@
 """Sidebar rendering for conversation history."""
 import streamlit as st
 
+from frontend.api import api_delete
 from frontend.state import (
     create_new_conversation,
     fetch_upload_history,
@@ -24,19 +25,34 @@ def _render_upload_sidebar():
             if not file_id:
                 continue
             label = upload.get("filename") or upload.get("file_name") or f"File #{file_id}"
-            meta = []
-            if upload.get("chunk_count") is not None:
-                meta.append(f"{upload.get('chunk_count')} chunks")
+            chunk_count = upload.get("chunk_count")
+            created_at = upload.get("created_at")
+
+            st.markdown(f"**{label}**  \n`#{file_id}`")
+            meta_parts = []
+            if chunk_count is not None:
+                meta_parts.append(f"chunks: {chunk_count}")
+            if created_at:
+                meta_parts.append(f"uploaded: {created_at}")
             if upload.get("size_bytes") is not None:
-                meta.append(f"{upload.get('size_bytes')} bytes")
-            meta_text = " | ".join(meta)
-            button_label = f"{label} (#{file_id})"
-            if st.button(button_label, key=f"upload_{file_id}", type="secondary", help=meta_text or None):
-                st.session_state.file_id = file_id
-                st.session_state.file_name = upload.get("filename") or upload.get("file_name")
-                st.session_state.messages = []
-                update_active_conversation_metadata()
-                st.rerun()
+                meta_parts.append(f"size: {upload.get('size_bytes')} bytes")
+            if meta_parts:
+                st.caption(" | ".join(meta_parts))
+
+            if st.button("Delete", key=f"delete_upload_{file_id}", type="primary"):
+                try:
+                    api_delete(f"/files/{file_id}")
+                    if st.session_state.get("file_id") == file_id:
+                        st.session_state.file_id = None
+                        st.session_state.file_name = None
+                        update_active_conversation_metadata()
+                    fetch_upload_history(force_refresh=True)
+                    st.success(f"Deleted file #{file_id}.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Delete failed: {e}")
+
+            st.markdown("---")
     else:
         st.info("No uploads yet. Add a file to see it listed here.")
 

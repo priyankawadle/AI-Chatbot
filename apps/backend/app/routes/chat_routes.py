@@ -34,6 +34,25 @@ from app.db.chat_repository import (
 router = APIRouter(tags=["chat"])
 
 
+def _touch_file_usage_stats(conn, file_ids: set[int]) -> None:
+    if not file_ids:
+        return
+    try:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                UPDATE uploaded_files
+                SET usage_count = usage_count + 1,
+                    last_queried_at = NOW()
+                WHERE id = ANY(%s);
+                """,
+                (list(file_ids),),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
+
 @router.get("/chat/conversations", response_model=ChatConversationListResponse)
 async def list_chat_conversations(
     conn=Depends(get_db_conn),
@@ -203,6 +222,17 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
                 reason="No chunks were retrieved for this query.",
             ),
         )
+
+    touched_file_ids: set[int] = set()
+    for hit in search_results:
+        hit_payload = hit.payload or {}
+        value = hit_payload.get("file_id")
+        try:
+            if value is not None:
+                touched_file_ids.add(int(value))
+        except (TypeError, ValueError):
+            continue
+    _touch_file_usage_stats(conn, touched_file_ids)
 
     scores = [float(hit.score) for hit in search_results if hit.score is not None]
     retrieval_summary = _build_retrieval_summary(

@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS uploaded_files (
     filename        TEXT NOT NULL,
     content_type    TEXT NOT NULL,
     size_bytes      BIGINT NOT NULL,
+    file_hash       TEXT UNIQUE,
+    usage_count     BIGINT NOT NULL DEFAULT 0,
+    last_queried_at TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

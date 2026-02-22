@@ -25,14 +25,17 @@ def api_get(path: str):
         return r.json()
 
 
-def api_post(path: str, payload: dict):
+def api_post(path: str, payload: dict | None = None):
     """
     Simple JSON POST helper for normal endpoints like /auth/login, /chat, etc.
     """
     url = f"{API_BASE}{path}"
     headers = _get_auth_header()
     with httpx.Client(timeout=30.0) as client:
-        r = client.post(url, json=payload, headers=headers)
+        if payload is None:
+            r = client.post(url, headers=headers)
+        else:
+            r = client.post(url, json=payload, headers=headers)
         r.raise_for_status()
         return r.json()
 
@@ -46,6 +49,18 @@ def api_put(path: str, payload: dict):
     headers = _get_auth_header()
     with httpx.Client(timeout=30.0) as client:
         r = client.put(url, json=payload, headers=headers)
+        r.raise_for_status()
+        if not r.content:
+            return None
+        return r.json()
+
+
+def api_delete(path: str):
+    """Simple DELETE helper."""
+    url = f"{API_BASE}{path}"
+    headers = _get_auth_header()
+    with httpx.Client(timeout=30.0) as client:
+        r = client.delete(url, headers=headers)
         r.raise_for_status()
         if not r.content:
             return None
@@ -70,5 +85,14 @@ def api_upload_file(path: str, file):
     headers = _get_auth_header()
     with httpx.Client(timeout=120.0) as client:
         r = client.post(url, files=files, headers=headers)
-        r.raise_for_status()
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            try:
+                detail = exc.response.json().get("detail")
+            except Exception:
+                detail = None
+            if detail:
+                raise RuntimeError(str(detail)) from exc
+            raise
         return r.json()

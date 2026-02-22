@@ -10,6 +10,8 @@ Files are:
   6. Indexed as vectors in Qdrant for semantic search.
 """
 
+import hashlib
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
 from qdrant_client.http import models as qmodels
@@ -28,6 +30,55 @@ from app.services.security import get_current_user, require_admin
 from app.services.vector_store import qdrant_client
 
 router = APIRouter(prefix="/files", tags=["files"])
+
+
+def _file_filter(file_id: int) -> qmodels.Filter:
+    return qmodels.Filter(
+        must=[
+            qmodels.FieldCondition(
+                key="file_id",
+                match=qmodels.MatchValue(value=file_id),
+            )
+        ]
+    )
+
+
+def _delete_file_points_from_qdrant(file_id: int) -> None:
+    qdrant_client.delete(
+        collection_name=QDRANT_COLLECTION_NAME,
+        points_selector=_file_filter(file_id),
+        wait=True,
+    )
+
+
+def _upsert_file_points_to_qdrant(
+    *,
+    file_id: int,
+    filename: str,
+    chunk_rows: list[tuple[int, int | None, str]],
+    embeddings: list[list[float]],
+) -> None:
+    points: list[qmodels.PointStruct] = []
+    for (chunk_index, page_number, chunk_text), vector in zip(chunk_rows, embeddings):
+        point_id = file_id * MAX_CHUNKS_PER_FILE + int(chunk_index)
+        points.append(
+            qmodels.PointStruct(
+                id=point_id,
+                vector=vector,
+                payload={
+                    "file_id": file_id,
+                    "chunk_index": int(chunk_index),
+                    "page_number": page_number,
+                    "filename": filename,
+                    "text": chunk_text,
+                },
+            )
+        )
+
+    qdrant_client.upsert(
+        collection_name=QDRANT_COLLECTION_NAME,
+        points=points,
+    )
 
 
 @router.post("/upload")
@@ -79,6 +130,29 @@ async def upload_file(
                 detail=f"File size exceeds {MAX_FILE_SIZE_MB}MB limit.",
             )
 
+        file_hash = hashlib.sha256(raw_bytes).hexdigest()
+
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT id, filename
+                FROM uploaded_files
+                WHERE file_hash = %s
+                LIMIT 1;
+                """,
+                (file_hash,),
+            )
+            duplicate = cur.fetchone()
+
+        if duplicate:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This file already exists in the corpus. "
+                    f"Existing file: #{duplicate[0]} ({duplicate[1]})."
+                ),
+            )
+
         # 3) Extract text and keep optional page numbers for citations
         chunk_records = []
         if filename_lower.endswith(".txt"):
@@ -112,14 +186,15 @@ async def upload_file(
                 # Insert file metadata and retrieve the generated id in one step
                 cur.execute(
                     """
-                    INSERT INTO uploaded_files (filename, content_type, size_bytes)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO uploaded_files (filename, content_type, size_bytes, file_hash)
+                    VALUES (%s, %s, %s, %s)
                     RETURNING id;
                     """,
                     (
                         file.filename,
                         file.content_type or "application/octet-stream",
                         size_bytes,
+                        file_hash,
                     ),
                 )
                 row = cur.fetchone()
@@ -147,6 +222,11 @@ async def upload_file(
             raise  # Let FastAPI-controlled errors propagate as-is
         except Exception as db_exc:
             conn.rollback()
+            if "duplicate key value" in str(db_exc).lower() and "file_hash" in str(db_exc).lower():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="This file already exists in the corpus.",
+                )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to store file or chunks: {db_exc}",
@@ -214,6 +294,8 @@ async def list_uploaded_files(conn=Depends(get_db_conn)):
                     f.content_type,
                     f.size_bytes,
                     f.created_at,
+                    f.usage_count,
+                    f.last_queried_at,
                     COUNT(c.id) AS chunk_count
                 FROM uploaded_files f
                 LEFT JOIN file_chunks c ON c.file_id = f.id
@@ -242,11 +324,151 @@ async def list_uploaded_files(conn=Depends(get_db_conn)):
                 "content_type": row[2],
                 "size_bytes": row[3],
                 "created_at": created_at_str,
-                "chunk_count": row[5],
+                "usage_count": row[5],
+                "last_queried_at": (row[6].isoformat() if row[6] else None),
+                "chunk_count": row[7],
             }
         )
 
     return {"files": files}
+
+
+@router.delete("/{file_id}")
+async def delete_uploaded_file(
+    file_id: int,
+    conn=Depends(get_db_conn),
+    current_user: dict = Depends(require_admin),
+):
+    """Delete a file and its chunks from PostgreSQL and Qdrant."""
+    try:
+        with db_cursor(conn) as cur:
+            cur.execute("SELECT filename FROM uploaded_files WHERE id = %s;", (file_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="File not found.",
+                )
+            filename = row[0]
+
+            cur.execute("DELETE FROM uploaded_files WHERE id = %s;", (file_id,))
+            if cur.rowcount == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="File not found.",
+                )
+        conn.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        conn.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete file from database: {exc}",
+        )
+
+    try:
+        _delete_file_points_from_qdrant(file_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "File was deleted from PostgreSQL, but failed to remove vectors from Qdrant: "
+                f"{exc}"
+            ),
+        )
+
+    return {
+        "message": "File deleted successfully.",
+        "file_id": file_id,
+        "filename": filename,
+    }
+
+
+@router.post("/{file_id}/reindex")
+async def reindex_uploaded_file(
+    file_id: int,
+    conn=Depends(get_db_conn),
+    current_user: dict = Depends(require_admin),
+):
+    """Rebuild embeddings and Qdrant points for an existing file."""
+    try:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT filename
+                FROM uploaded_files
+                WHERE id = %s;
+                """,
+                (file_id,),
+            )
+            file_row = cur.fetchone()
+            if not file_row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="File not found.",
+                )
+            filename = file_row[0]
+
+            cur.execute(
+                """
+                SELECT chunk_index, page_number, content
+                FROM file_chunks
+                WHERE file_id = %s
+                ORDER BY chunk_index ASC;
+                """,
+                (file_id,),
+            )
+            chunk_rows = cur.fetchall()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load file chunks for reindex: {exc}",
+        )
+
+    if not chunk_rows:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No chunks found for this file; cannot re-index.",
+        )
+
+    chunk_texts = [str(row[2]) for row in chunk_rows]
+    try:
+        embeddings = embed_texts(chunk_texts)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate embeddings during re-index: {exc}",
+        )
+
+    if len(embeddings) != len(chunk_rows):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Embedding count mismatch during re-index.",
+        )
+
+    try:
+        _delete_file_points_from_qdrant(file_id)
+        _upsert_file_points_to_qdrant(
+            file_id=file_id,
+            filename=filename,
+            chunk_rows=chunk_rows,
+            embeddings=embeddings,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update vectors in Qdrant during re-index: {exc}",
+        )
+
+    return {
+        "message": "File re-indexed successfully.",
+        "file_id": file_id,
+        "filename": filename,
+        "chunks_reindexed": len(chunk_rows),
+    }
 
 
 @router.get("/{file_id}/chunks/{chunk_index}")
