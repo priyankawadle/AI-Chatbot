@@ -36,7 +36,10 @@ CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-nano")
 
 # Search and chunking defaults
 TOP_K = 5
-MIN_SCORE = 0.35
+MIN_SCORE_ANSWER = float(os.getenv("MIN_SCORE_ANSWER", "0.35"))
+LOW_CONFIDENCE_SCORE = float(os.getenv("LOW_CONFIDENCE_SCORE", "0.50"))
+# Backward-compatible alias for existing code paths that still import MIN_SCORE.
+MIN_SCORE = MIN_SCORE_ANSWER
 MAX_CHARS_PER_CHUNK = 1000
 MAX_CHUNKS_PER_FILE = 100_000
 MAX_FILE_SIZE_MB = 50  # Maximum file size in MB

@@ -4,7 +4,7 @@ from collections import defaultdict
 import streamlit as st
 
 from frontend.api import api_post, api_upload_file
-from frontend.models import ChatCitation, ChatResponse
+from frontend.models import ChatCitation, ChatResponse, RetrievalSummary
 from frontend.state import (
     fetch_upload_history,
     get_active_conversation,
@@ -43,6 +43,18 @@ def _format_grouped_citations(citations: list[ChatCitation]) -> str:
             parts.append(f"[File: {filename}, Page Unknown]")
 
     return " ".join(parts)
+
+
+def _format_retrieval_summary(retrieval: RetrievalSummary) -> str:
+    def _fmt_score(value: float | None) -> str:
+        return f"{value:.3f}" if value is not None else "N/A"
+
+    return (
+        f"top={_fmt_score(retrieval.top_score)} | "
+        f"avg={_fmt_score(retrieval.avg_score)} | "
+        f"chunks used={retrieval.chunks_used}/{retrieval.total_hits} | "
+        f"confidence={retrieval.confidence_label}"
+    )
 
 
 def render_upload_step(active_conv):
@@ -172,9 +184,24 @@ def render_chat_step():
             data = api_post("/chat", payload)
             chat_response = ChatResponse(**data)
             bot_reply = chat_response.reply
+
+            if chat_response.retrieval.low_confidence:
+                reason = (
+                    chat_response.retrieval.reason
+                    or "Matches were weak. Try rephrasing with specific terms from the document."
+                )
+                bot_reply = (
+                    f"**Low confidence warning:** {reason}\n"
+                    "Try adding exact keywords, section names, dates, or policy names.\n\n"
+                    f"{bot_reply}"
+                )
+
             if chat_response.citations:
                 citation_text = _format_grouped_citations(chat_response.citations)
                 bot_reply = f"{bot_reply}\n\n**Citations:** {citation_text}"
+
+            retrieval_text = _format_retrieval_summary(chat_response.retrieval)
+            bot_reply = f"{bot_reply}\n\n**Retrieval:** {retrieval_text}"
         except Exception as e:
             bot_reply = f"Error: {e}"
 

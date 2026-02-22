@@ -4,14 +4,58 @@ from typing import List, Set, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status
 from qdrant_client.http import models as qmodels
 
-from app.config import CHAT_MODEL, MIN_SCORE, QDRANT_COLLECTION_NAME, TOP_K
-from app.models.schemas import ChatCitation, ChatRequest, ChatResponse
+from app.config import (
+    CHAT_MODEL,
+    LOW_CONFIDENCE_SCORE,
+    MIN_SCORE_ANSWER,
+    QDRANT_COLLECTION_NAME,
+    TOP_K,
+)
+from app.models.schemas import ChatCitation, ChatRequest, ChatResponse, RetrievalSummary
 from app.services.embeddings import embed_texts, openai_client
 from app.services.security import get_current_user
 from app.services.vector_store import qdrant_client
 from app.db.database import db_cursor, get_db_conn
 
 router = APIRouter(tags=["chat"])
+
+
+def _build_retrieval_summary(
+    *,
+    scores: List[float],
+    total_hits: int,
+    chunks_used: int = 0,
+    reason: str | None = None,
+) -> RetrievalSummary:
+    top_score = max(scores) if scores else None
+    avg_score = (sum(scores) / len(scores)) if scores else None
+
+    if top_score is None:
+        confidence_label = "low"
+        low_confidence = True
+        fallback_reason = "No retrieval scores were available."
+    elif top_score < MIN_SCORE_ANSWER:
+        confidence_label = "low"
+        low_confidence = True
+        fallback_reason = "Top retrieval score is below the answer threshold."
+    elif top_score < LOW_CONFIDENCE_SCORE:
+        confidence_label = "medium"
+        low_confidence = True
+        fallback_reason = "Matches were weak; answer may be incomplete."
+    else:
+        confidence_label = "high"
+        low_confidence = False
+        fallback_reason = "Strong retrieval match."
+
+    return RetrievalSummary(
+        top_score=top_score,
+        avg_score=avg_score,
+        chunks_used=chunks_used,
+        total_hits=total_hits,
+        low_confidence=low_confidence,
+        confidence_label=confidence_label,
+        reason=reason or fallback_reason,
+    )
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -84,18 +128,29 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
             reply=(
                 "I couldn't find any relevant information in the uploaded document "
                 "for your question."
-            )
+            ),
+            retrieval=_build_retrieval_summary(
+                scores=[],
+                total_hits=0,
+                reason="No chunks were retrieved for this query.",
+            ),
         )
 
+    scores = [float(hit.score) for hit in search_results if hit.score is not None]
+    retrieval_summary = _build_retrieval_summary(
+        scores=scores,
+        total_hits=len(search_results),
+    )
+
     # Check best score against threshold for relevance
-    best_score = search_results[0].score
-    if best_score is None or best_score < MIN_SCORE:
+    if retrieval_summary.top_score is None or retrieval_summary.top_score < MIN_SCORE_ANSWER:
         return ChatResponse(
             reply=(
                 "I searched your uploaded document but couldn't find a strong match "
                 "for your question. Please try rephrasing or ask about another part "
                 "of the document."
-            )
+            ),
+            retrieval=retrieval_summary,
         )
 
     # 3) Build context from top-k chunks
@@ -103,11 +158,11 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
     citations: List[ChatCitation] = []
     seen_citations: Set[Tuple[int, int]] = set()
     for hit in search_results:
-        payload = hit.payload or {}
-        text = payload.get("text", "")
-        file_id = payload.get("file_id")
-        page_number = payload.get("page_number")
-        filename = payload.get("filename")
+        hit_payload = hit.payload or {}
+        text = hit_payload.get("text", "")
+        file_id = hit_payload.get("file_id")
+        page_number = hit_payload.get("page_number")
+        filename = hit_payload.get("filename")
 
         if text:
             page_label = page_number if page_number is not None else "Unknown"
@@ -137,12 +192,17 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
         )
 
     if not context_snippets:
+        retrieval_summary.chunks_used = 0
+        retrieval_summary.reason = "Retrieved chunks did not contain usable text."
         return ChatResponse(
             reply=(
                 "I tried to read relevant parts of the document, but couldn't extract "
                 "any usable text for your question."
-            )
+            ),
+            retrieval=retrieval_summary,
         )
+
+    retrieval_summary.chunks_used = len(context_snippets)
 
     context_block = "\n\n".join(context_snippets)
 
@@ -187,4 +247,4 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
             "Please try rephrasing your question."
         )
 
-    return ChatResponse(reply=answer, citations=citations)
+    return ChatResponse(reply=answer, citations=citations, retrieval=retrieval_summary)

@@ -1,8 +1,8 @@
 Based on your current app (auth + roles, admin upload, RAG chat across all docs, and filename shown in response), these are 5 strong next features:
 
-1. **Inline citations with chunk references**
-- Show clickable citations like `[File: policy.pdf, Chunk 12]` in every answer.
-- You already have `chunk_index` + `filename` in Qdrant payload, so this is a natural upgrade from just showing file name.
+1. **Inline citations with page references** --> DONE
+- Show clickable citations like `[File: policy.pdf, page 12]` in every answer.
+- You already have `page` + `filename` in Qdrant payload, so this is a natural upgrade from just showing file name.
 
 <!-- Not Urgent /not required -->
 2. **Document filter in chat (All docs / selected docs)**
@@ -13,7 +13,7 @@ Based on your current app (auth + roles, admin upload, RAG chat across all docs,
 - Persist chats in DB per user (instead of session-only cache), with restore across browser/device.
 - Add rename/delete/export for conversations for better long-term usability.
 
-4. **Answer quality controls (confidence + fallback UX)**
+4. **Answer quality controls (confidence + fallback UX)** --> DONE
 - Return retrieval score summary (top score, chunks used) and show “low confidence” warning when weak matches occur.
 - This builds trust and helps users rephrase when the system is uncertain.
 

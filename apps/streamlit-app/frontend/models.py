@@ -11,9 +11,20 @@ class ChatCitation(BaseModel):
     score: Optional[float] = None
 
 
+class RetrievalSummary(BaseModel):
+    top_score: Optional[float] = None
+    avg_score: Optional[float] = None
+    chunks_used: int = 0
+    total_hits: int = 0
+    low_confidence: bool = False
+    confidence_label: str = "low"
+    reason: Optional[str] = None
+
+
 class ChatResponse(BaseModel):
     reply: str
     citations: List[ChatCitation] = Field(default_factory=list)
+    retrieval: RetrievalSummary = Field(default_factory=RetrievalSummary)
 
 
 class User(BaseModel):
