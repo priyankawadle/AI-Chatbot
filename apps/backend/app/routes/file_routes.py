@@ -23,8 +23,8 @@ from app.config import (
 from app.db.database import db_cursor, get_db_conn
 from app.services.chunking import chunk_text
 from app.services.embeddings import embed_texts
-from app.services.pdf_processing import extract_text_from_pdf
-from app.services.security import require_admin
+from app.services.pdf_processing import extract_text_pages_from_pdf
+from app.services.security import get_current_user, require_admin
 from app.services.vector_store import qdrant_client
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -79,29 +79,28 @@ async def upload_file(
                 detail=f"File size exceeds {MAX_FILE_SIZE_MB}MB limit.",
             )
 
-        # 3) Extract plain text depending on file type
+        # 3) Extract text and keep optional page numbers for citations
+        chunk_records = []
         if filename_lower.endswith(".txt"):
             text_content = raw_bytes.decode("utf-8", errors="ignore").strip()
+            for chunk in chunk_text(text_content):
+                chunk_records.append({"text": chunk, "page_number": 1})
         else:  # .pdf
-            text_content = extract_text_from_pdf(raw_bytes)
+            text_pages = extract_text_pages_from_pdf(raw_bytes)
+            for page_number, page_text in text_pages:
+                for chunk in chunk_text(page_text):
+                    chunk_records.append({"text": chunk, "page_number": page_number})
 
-        if not text_content:
+        if not chunk_records:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No readable text found in the uploaded file.",
             )
 
-        # 4) Split the extracted text into overlapping chunks
-        chunks = chunk_text(text_content)
-        if not chunks:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Uploaded file is empty or could not be parsed into chunks.",
-            )
-
         # 5) Generate vector embeddings for every chunk via OpenAI
+        chunks = [record["text"] for record in chunk_records]
         embeddings = embed_texts(chunks)
-        if len(embeddings) != len(chunks):
+        if len(embeddings) != len(chunk_records):
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to generate embeddings for all chunks.",
@@ -133,13 +132,13 @@ async def upload_file(
                     )
 
                 # Insert every text chunk linked to the file
-                for idx, chunk in enumerate(chunks):
+                for idx, record in enumerate(chunk_records):
                     cur.execute(
                         """
-                        INSERT INTO file_chunks (file_id, chunk_index, content)
-                        VALUES (%s, %s, %s);
+                        INSERT INTO file_chunks (file_id, chunk_index, page_number, content)
+                        VALUES (%s, %s, %s, %s);
                         """,
-                        (file_id, idx, chunk),
+                        (file_id, idx, record["page_number"], record["text"]),
                     )
 
             conn.commit()
@@ -155,7 +154,7 @@ async def upload_file(
 
         # 7) Index the chunk embeddings in Qdrant for semantic search
         points = []
-        for idx, (chunk_text_value, vector) in enumerate(zip(chunks, embeddings)):
+        for idx, (record, vector) in enumerate(zip(chunk_records, embeddings)):
             # Deterministic point id: file_id * large_offset + chunk_index
             point_id = file_id * MAX_CHUNKS_PER_FILE + idx
             points.append(
@@ -165,8 +164,9 @@ async def upload_file(
                     payload={
                         "file_id": file_id,
                         "chunk_index": idx,
+                        "page_number": record["page_number"],
                         "filename": file.filename,
-                        "text": chunk_text_value,
+                        "text": record["text"],
                     },
                 )
             )
@@ -247,3 +247,48 @@ async def list_uploaded_files(conn=Depends(get_db_conn)):
         )
 
     return {"files": files}
+
+
+@router.get("/{file_id}/chunks/{chunk_index}")
+async def get_chunk_content(
+    file_id: int,
+    chunk_index: int,
+    conn=Depends(get_db_conn),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Return a specific stored chunk by file id and chunk index.
+    Used by citation links in the Streamlit chat UI.
+    """
+    try:
+        with db_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT f.filename, c.page_number, c.content
+                FROM file_chunks c
+                JOIN uploaded_files f ON f.id = c.file_id
+                WHERE c.file_id = %s AND c.chunk_index = %s
+                LIMIT 1;
+                """,
+                (file_id, chunk_index),
+            )
+            row = cur.fetchone()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load chunk: {exc}",
+        )
+
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chunk not found for the requested file.",
+        )
+
+    return {
+        "file_id": file_id,
+        "filename": row[0],
+        "page_number": row[1],
+        "chunk_index": chunk_index,
+        "content": row[2],
+    }

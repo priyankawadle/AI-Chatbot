@@ -1,6 +1,6 @@
 
 """Pydantic models used for request and response bodies."""
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -50,11 +50,26 @@ class ChatRequest(BaseModel):
     file_id: Optional[int] = None
 
 
+class ChatCitation(BaseModel):
+    file_id: int
+    filename: str
+    page_number: Optional[int] = None
+    score: Optional[float] = None
+
+
 class ChatResponse(BaseModel):
     """
     Outgoing payload to Streamlit:
         {
-            "reply": "... bot answer ..."
+            "reply": "... bot answer ...",
+            "citations": [
+                {
+                    "file_id": 1,
+                    "filename": "policy.pdf",
+                    "page_number": 3
+                }
+            ]
         }
     """
     reply: str
+    citations: List[ChatCitation] = Field(default_factory=list)

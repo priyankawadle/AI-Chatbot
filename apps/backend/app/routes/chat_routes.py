@@ -1,11 +1,11 @@
 """Routes that handle chat over uploaded documents."""
-from typing import List
+from typing import List, Set, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from qdrant_client.http import models as qmodels
 
 from app.config import CHAT_MODEL, MIN_SCORE, QDRANT_COLLECTION_NAME, TOP_K
-from app.models.schemas import ChatRequest, ChatResponse
+from app.models.schemas import ChatCitation, ChatRequest, ChatResponse
 from app.services.embeddings import embed_texts, openai_client
 from app.services.security import get_current_user
 from app.services.vector_store import qdrant_client
@@ -100,18 +100,41 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
 
     # 3) Build context from top-k chunks
     context_snippets: List[str] = []
-    source_filenames: List[str] = []
+    citations: List[ChatCitation] = []
+    seen_citations: Set[Tuple[int, int]] = set()
     for hit in search_results:
         payload = hit.payload or {}
         text = payload.get("text", "")
-        chunk_index = payload.get("chunk_index", "?")
+        file_id = payload.get("file_id")
+        page_number = payload.get("page_number")
         filename = payload.get("filename")
 
-        if filename and filename not in source_filenames:
-            source_filenames.append(str(filename))
-
         if text:
-            context_snippets.append(f"[Chunk {chunk_index}] {text}")
+            page_label = page_number if page_number is not None else "Unknown"
+            context_snippets.append(f"[File: {filename or 'Unknown'}, Page {page_label}] {text}")
+
+        if file_id is None:
+            continue
+
+        try:
+            file_id_int = int(file_id)
+            page_number_int = int(page_number) if page_number is not None else -1
+        except (TypeError, ValueError):
+            continue
+
+        citation_key = (file_id_int, page_number_int)
+        if citation_key in seen_citations:
+            continue
+
+        seen_citations.add(citation_key)
+        citations.append(
+            ChatCitation(
+                file_id=file_id_int,
+                filename=str(filename or f"file_{file_id_int}"),
+                page_number=(page_number_int if page_number_int >= 1 else None),
+                score=float(hit.score) if hit.score is not None else None,
+            )
+        )
 
     if not context_snippets:
         return ChatResponse(
@@ -164,8 +187,4 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
             "Please try rephrasing your question."
         )
 
-    if source_filenames:
-        source_label = "Source file" if len(source_filenames) == 1 else "Source files"
-        answer = f"{answer}\n\n{source_label}: {', '.join(source_filenames)}"
-
-    return ChatResponse(reply=answer)
+    return ChatResponse(reply=answer, citations=citations)

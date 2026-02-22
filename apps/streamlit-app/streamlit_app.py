@@ -83,9 +83,6 @@ with top_col2:
         st.toast("Logged out", icon="\u2705")
         st.rerun()
 
-# ---------- Main Content ----------
-
-
 # Create tabs for Upload and Chat
 if role == "admin":
     # Admins see both upload and chat tabs

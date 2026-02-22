@@ -1,14 +1,48 @@
 """Main chat + upload workflow rendering."""
+from collections import defaultdict
+
 import streamlit as st
 
 from frontend.api import api_post, api_upload_file
-from frontend.models import ChatResponse
+from frontend.models import ChatCitation, ChatResponse
 from frontend.state import (
     fetch_upload_history,
     get_active_conversation,
     maybe_update_conversation_title_from_prompt,
     update_active_conversation_metadata,
 )
+
+
+def _format_citation(citation: ChatCitation) -> str:
+    page_label = citation.page_number if citation.page_number is not None else "Unknown"
+    return f"[File: {citation.filename}, Page {page_label}]"
+
+
+def _format_grouped_citations(citations: list[ChatCitation]) -> str:
+    pages_by_file = defaultdict(set)
+    unknown_by_file = defaultdict(bool)
+
+    for citation in citations:
+        if citation.page_number is None:
+            unknown_by_file[citation.filename] = True
+            continue
+        pages_by_file[citation.filename].add(citation.page_number)
+
+    ordered_files = []
+    for citation in citations:
+        if citation.filename not in ordered_files:
+            ordered_files.append(citation.filename)
+
+    parts = []
+    for filename in ordered_files:
+        page_values = sorted(pages_by_file.get(filename, set()))
+        if page_values:
+            page_csv = ",".join(str(p) for p in page_values)
+            parts.append(f"[File: {filename}, Page {page_csv}]")
+        elif unknown_by_file.get(filename):
+            parts.append(f"[File: {filename}, Page Unknown]")
+
+    return " ".join(parts)
 
 
 def render_upload_step(active_conv):
@@ -136,7 +170,11 @@ def render_chat_step():
             payload = {"message": prompt}
             # No file_id specified -> backend searches all files
             data = api_post("/chat", payload)
-            bot_reply = ChatResponse(**data).reply
+            chat_response = ChatResponse(**data)
+            bot_reply = chat_response.reply
+            if chat_response.citations:
+                citation_text = _format_grouped_citations(chat_response.citations)
+                bot_reply = f"{bot_reply}\n\n**Citations:** {citation_text}"
         except Exception as e:
             bot_reply = f"Error: {e}"
 
