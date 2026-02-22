@@ -1,0 +1,42 @@
+Based on your current app (auth + roles, admin upload, RAG chat across all docs, and filename shown in response), these are 5 strong next features:
+
+1. **Inline citations with chunk references**
+- Show clickable citations like `[File: policy.pdf, Chunk 12]` in every answer.
+- You already have `chunk_index` + `filename` in Qdrant payload, so this is a natural upgrade from just showing file name.
+
+<!-- Not Urgent /not required -->
+2. **Document filter in chat (All docs / selected docs)**
+- Add a multi-select in chat so users can query specific files instead of always searching all uploads.
+- This will improve answer precision and reduce noisy retrieval in large document sets.
+
+3. **Server-side conversation history**
+- Persist chats in DB per user (instead of session-only cache), with restore across browser/device.
+- Add rename/delete/export for conversations for better long-term usability.
+
+4. **Answer quality controls (confidence + fallback UX)**
+- Return retrieval score summary (top score, chunks used) and show “low confidence” warning when weak matches occur.
+- This builds trust and helps users rephrase when the system is uncertain.
+
+5. **Admin document management panel**
+- Add file delete/re-index/view stats (chunks, upload date, usage count, last queried).
+- Right now uploads are list-only; lifecycle management becomes important as your corpus grows.
+
+5. **Hybrid retrieval (semantic + keyword/BM25)**
+- Combine vector search with keyword search and rerank merged results.
+- Improves recall for exact terms (IDs, policy names, numbers) that embeddings can miss.
+
+6. **Reranker model before final context**
+- After retrieving top chunks, run a cross-encoder reranker to pick the truly relevant few.
+- This usually improves precision and reduces irrelevant context sent to the LLM.
+
+7. **Metadata-aware filtering**
+- Add filters like document type, date, version, team, language.
+- Prevents the model from using outdated or wrong-scope chunks.
+
+8. **Better chunking strategy**
+- Switch to structure-aware chunking (headings/sections/tables) with overlap tuned by doc type.
+- Better chunk boundaries directly improve retrieval quality and final answer grounding.
+
+9. **Grounded answer mode with strict refusal**
+- Enforce answer format: claim -> supporting citation; if evidence is weak, respond “not found in docs.”
+- Reduces hallucinations and makes answers reliably evidence-backed.

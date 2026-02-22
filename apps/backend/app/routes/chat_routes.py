@@ -100,10 +100,16 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
 
     # 3) Build context from top-k chunks
     context_snippets: List[str] = []
+    source_filenames: List[str] = []
     for hit in search_results:
         payload = hit.payload or {}
         text = payload.get("text", "")
         chunk_index = payload.get("chunk_index", "?")
+        filename = payload.get("filename")
+
+        if filename and filename not in source_filenames:
+            source_filenames.append(str(filename))
+
         if text:
             context_snippets.append(f"[Chunk {chunk_index}] {text}")
 
@@ -157,5 +163,9 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
             "I tried to answer from the document, but couldn't generate a useful response. "
             "Please try rephrasing your question."
         )
+
+    if source_filenames:
+        source_label = "Source file" if len(source_filenames) == 1 else "Source files"
+        answer = f"{answer}\n\n{source_label}: {', '.join(source_filenames)}"
 
     return ChatResponse(reply=answer)

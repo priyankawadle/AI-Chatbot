@@ -108,10 +108,13 @@ def render_chat_step():
     st.caption(f"Searching across {doc_count} document{'s' if doc_count != 1 else ''}...")
     st.markdown("---")
 
-    # Render chat history for this conversation
-    for role, content in st.session_state.messages:
-        with st.chat_message(role):
-            st.markdown(content)
+    # Keep all chat messages in a dedicated container above the input.
+    chat_container = st.container()
+    with chat_container:
+        # Render chat history for this conversation
+        for role, content in st.session_state.messages:
+            with st.chat_message(role):
+                st.markdown(content)
 
     # Chat input
     if prompt := st.chat_input("Ask a question..."):
@@ -124,8 +127,9 @@ def render_chat_step():
         if active_conv:
             active_conv["messages"] = st.session_state.messages  # keep reference in sync
 
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        with chat_container:
+            with st.chat_message("user"):
+                st.markdown(prompt)
 
         # Call backend chat API - always search all files (no file_id)
         try:
@@ -141,5 +145,6 @@ def render_chat_step():
         if active_conv:
             active_conv["messages"] = st.session_state.messages
 
-        with st.chat_message("assistant"):
-            st.markdown(bot_reply)
+        with chat_container:
+            with st.chat_message("assistant"):
+                st.markdown(bot_reply)
