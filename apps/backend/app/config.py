@@ -39,6 +39,7 @@ TOP_K = 5
 MIN_SCORE = 0.35
 MAX_CHARS_PER_CHUNK = 1000
 MAX_CHUNKS_PER_FILE = 100_000
+MAX_FILE_SIZE_MB = 50  # Maximum file size in MB
 SUPPORTED_EXTENSIONS = (".txt", ".pdf")
 
 # FastAPI app metadata and CORS

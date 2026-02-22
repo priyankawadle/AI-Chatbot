@@ -63,7 +63,7 @@ pip install -r apps/backend/requirements.txt -r apps/streamlit-app/requirements.
     `QDRANT_PATH`,
     `QDRANT_COLLECTION_NAME`
 
-4) (Optional) Remote Qdrant instead of embedded:
+4) Remote Qdrant instead of embedded:
 ```bash
 docker run -p 6333:6333 qdrant/qdrant
 # set QDRANT_URL=http://localhost:6333 in both env files

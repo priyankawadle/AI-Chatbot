@@ -7,6 +7,7 @@ from qdrant_client.http import models as qmodels
 from app.config import CHAT_MODEL, MIN_SCORE, QDRANT_COLLECTION_NAME, TOP_K
 from app.models.schemas import ChatRequest, ChatResponse
 from app.services.embeddings import embed_texts, openai_client
+from app.services.security import get_current_user
 from app.services.vector_store import qdrant_client
 from app.db.database import db_cursor, get_db_conn
 
@@ -14,7 +15,7 @@ router = APIRouter(tags=["chat"])
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn)):
+async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current_user: dict = Depends(get_current_user)):
     """
     Chat over a single uploaded file.
 

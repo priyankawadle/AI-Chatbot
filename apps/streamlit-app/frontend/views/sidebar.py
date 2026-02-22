@@ -23,7 +23,6 @@ def render_sidebar_history():
             # Bump uploader_key to force Streamlit to render a fresh file_uploader widget
             st.session_state.uploader_key = st.session_state.get("uploader_key", 0) + 1
             st.rerun()
-        st.caption("Pick a file to make it active.")
 
         uploads = st.session_state.get("uploads", [])
         if not uploads:

@@ -44,40 +44,61 @@ if not active_conv:
     active_conv = get_active_conversation()
 
 # ---------- Top bar: Title + Account details ----------
-top_col1, top_col2 = st.columns([4, 3])
+top_col1, top_col2 = st.columns([5, 2])
 
 with top_col1:
-    st.title("AI ChatBot")
+    st.markdown("""
+    <div style="margin-bottom: 15px;">
+    <h1 style="margin: 0; color: #ffffff;">🤖 AI Document Assistant</h1>
+    <p style="margin: 5px 0 0 0; color: #a0a0a0; font-size: 14px;">Smart document search and Q&A</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 with top_col2:
     email = st.session_state.user["email"]
     role = st.session_state.user.get("role", "user")
-    info_col1, info_col2 = st.columns([3, 2])
-    with info_col1:
-        st.write("Logged in")
-        st.write(f"**{email}**")
-        st.caption(f"Role: {role}")
-    with info_col2:
-        if st.button("Logout", key="logout_btn"):
-            # Save this user's conversations in the session cache so a later login can restore them
-            stash_conversations_for_user(email)
-            # Clear all state on logout
-            st.session_state.user = None
-            st.session_state.tokens = None
-            st.session_state.conversations = []
-            st.session_state.active_conv_id = None
-            st.session_state.messages = []
-            st.session_state.file_id = None
-            st.session_state.file_name = None
-            st.session_state.uploads = []
-            st.session_state.upload_history_loaded = False
-            clear_auth_query_params()
-            st.toast("Logged out", icon="\u2705")
-            st.rerun()
+    
+    st.markdown(f"""
+    <div style="text-align: right; font-size: 13px; line-height: 1.6;">
+    <p style="margin: 0; color: #808080;">Logged in</p>
+    <p style="margin: 3px 0; color: #ffffff; font-weight: 500;">{email}</p>
+    <p style="margin: 5px 0 0 0; color: #a0a0a0; font-size: 12px;">{'Admin' if role == 'admin' else 'User'}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if st.button("Logout", key="logout_btn", use_container_width=True):
+        # Save this user's conversations in the session cache so a later login can restore them
+        stash_conversations_for_user(email)
+        # Clear all state on logout
+        st.session_state.user = None
+        st.session_state.tokens = None
+        st.session_state.conversations = []
+        st.session_state.active_conv_id = None
+        st.session_state.messages = []
+        st.session_state.file_id = None
+        st.session_state.file_name = None
+        st.session_state.uploads = []
+        st.session_state.upload_history_loaded = False
+        clear_auth_query_params()
+        st.toast("Logged out", icon="\u2705")
+        st.rerun()
 
-# ---------- Steps ----------
+# ---------- Main Content ----------
+
+
+# Create tabs for Upload and Chat
 if role == "admin":
-    render_upload_step(active_conv)
-
+    # Admins see both upload and chat tabs
+    upload_tab, chat_tab = st.tabs(["📁 Upload Documents", "💬 Chat"])
+    
+    with upload_tab:
+        st.markdown("")
+        render_upload_step(active_conv)
+    
+    with chat_tab:
+        st.markdown("")
+        render_chat_step()
 else:
+    # Users only see chat tab
+    st.markdown("")
     render_chat_step()

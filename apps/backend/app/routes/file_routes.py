@@ -16,6 +16,7 @@ from qdrant_client.http import models as qmodels
 
 from app.config import (
     MAX_CHUNKS_PER_FILE,
+    MAX_FILE_SIZE_MB,
     SUPPORTED_EXTENSIONS,
     QDRANT_COLLECTION_NAME,
 )
@@ -68,6 +69,14 @@ async def upload_file(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Uploaded file is empty.",
+            )
+
+        # Check file size limit
+        max_size_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
+        if size_bytes > max_size_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File size exceeds {MAX_FILE_SIZE_MB}MB limit.",
             )
 
         # 3) Extract plain text depending on file type
