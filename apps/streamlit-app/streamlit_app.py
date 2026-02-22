@@ -33,10 +33,6 @@ if not st.session_state.user:
 # From here on, user is logged in
 ensure_conversation_state()
 
-# ---------- Sidebar: Conversation history ----------
-with st.sidebar:
-    render_sidebar_history()
-
 # Ensure we have a valid active conversation loaded
 active_conv = get_active_conversation()
 if not active_conv:
@@ -47,25 +43,31 @@ if not active_conv:
 top_col1, top_col2 = st.columns([5, 2])
 
 with top_col1:
-    st.markdown("""
+    st.markdown(
+        """
     <div style="margin-bottom: 15px;">
-    <h1 style="margin: 0; color: #ffffff;">🤖 AI Document Assistant</h1>
+    <h1 style="margin: 0; color: #ffffff;">AI Document Assistant</h1>
     <p style="margin: 5px 0 0 0; color: #a0a0a0; font-size: 14px;">Smart document search and Q&A</p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 with top_col2:
     email = st.session_state.user["email"]
     role = st.session_state.user.get("role", "user")
-    
-    st.markdown(f"""
+
+    st.markdown(
+        f"""
     <div style="text-align: right; font-size: 13px; line-height: 1.6;">
     <p style="margin: 0; color: #808080;">Logged in</p>
     <p style="margin: 3px 0; color: #ffffff; font-weight: 500;">{email}</p>
     <p style="margin: 5px 0 0 0; color: #a0a0a0; font-size: 12px;">{'Admin' if role == 'admin' else 'User'}</p>
     </div>
-    """, unsafe_allow_html=True)
-    
+    """,
+        unsafe_allow_html=True,
+    )
+
     if st.button("Logout", key="logout_btn", use_container_width=True):
         # Save this user's conversations in the session cache so a later login can restore them
         stash_conversations_for_user(email)
@@ -83,19 +85,34 @@ with top_col2:
         st.toast("Logged out", icon="\u2705")
         st.rerun()
 
-# Create tabs for Upload and Chat
+# Main area content
 if role == "admin":
-    # Admins see both upload and chat tabs
-    upload_tab, chat_tab = st.tabs(["📁 Upload Documents", "💬 Chat"])
-    
-    with upload_tab:
+    if "admin_view" not in st.session_state:
+        st.session_state.admin_view = "Upload Documents"
+
+    selected_view = st.radio(
+        "Admin view",
+        options=["Upload Documents", "Chat"],  
+        horizontal=True,
+        key="admin_view",
+        label_visibility="collapsed",
+    )
+
+    if selected_view == "Upload Documents":
         st.markdown("")
         render_upload_step(active_conv)
-    
-    with chat_tab:
+    else:
         st.markdown("")
         render_chat_step()
 else:
-    # Users only see chat tab
     st.markdown("")
     render_chat_step()
+
+# ---------- Sidebar ----------
+admin_sidebar_view = (
+    "upload"
+    if role == "admin" and st.session_state.get("admin_view") == "Upload Documents"
+    else "chat"
+)
+with st.sidebar:
+    render_sidebar_history(admin_view=admin_sidebar_view)
