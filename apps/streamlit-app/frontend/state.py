@@ -1,10 +1,11 @@
 """Helpers to manage Streamlit session state in one place."""
 import base64
-import copy
 import json
 from typing import Optional
 
 import streamlit as st
+
+from frontend.api import api_get, api_post, api_put
 
 AUTH_QUERY_KEY = "auth"
 
@@ -21,9 +22,6 @@ def ensure_base_state():
         st.session_state.upload_history_loaded = False
     if "uploader_key" not in st.session_state:
         st.session_state.uploader_key = 0  # used to reset the file_uploader widget
-    if "conversation_cache" not in st.session_state:
-        # Per-user in-memory cache so chat history survives logout/login within the same browser session.
-        st.session_state.conversation_cache = {}
 
 
 def ensure_conversation_state():
@@ -47,10 +45,10 @@ def ensure_conversation_state():
     if "file_name" not in st.session_state:
         st.session_state.file_name = None
 
-    # Try to restore cached conversations for this user if present
+    # Try to load persisted conversations from backend for this user
     if st.session_state.user and not st.session_state.conversations:
-        restored = restore_conversations_for_user(st.session_state.user["email"])
-        if restored:
+        loaded = load_conversations_from_backend()
+        if loaded:
             return
 
     # If logged in and no conversation yet, create the first one
@@ -63,15 +61,29 @@ def create_new_conversation(initial: bool = False):
     Create a new blank conversation in local state.
     Later, this can call an API to create a new chat.
     """
-    conversations = st.session_state.conversations
+    title = "New chat" if initial else "New chat"
+    file_id = st.session_state.get("file_id")
+    file_name = st.session_state.get("file_name")
+    new_id = None
+    if st.session_state.get("user"):
+        try:
+            data = api_post(
+                "/chat/conversations",
+                {"title": title, "file_id": file_id, "file_name": file_name},
+            )
+            new_id = data.get("id")
+        except Exception as e:
+            st.warning(f"Could not create conversation in DB: {e}")
 
-    new_id = (max([c["id"] for c in conversations]) + 1) if conversations else 1
+    conversations = st.session_state.conversations
+    if new_id is None:
+        new_id = (max([c["id"] for c in conversations]) + 1) if conversations else 1
 
     conv = {
         "id": new_id,
-        "title": "New chat" if initial else f"Chat {new_id}",
-        "file_id": None,
-        "file_name": None,
+        "title": title,
+        "file_id": file_id,
+        "file_name": file_name,
         "messages": [],  # we'll bind this to st.session_state.messages
     }
 
@@ -121,6 +133,7 @@ def update_active_conversation_metadata():
     if conv:
         conv["file_id"] = st.session_state.file_id
         conv["file_name"] = st.session_state.file_name
+        persist_active_conversation()
 
 
 def maybe_update_conversation_title_from_prompt(prompt: str):
@@ -137,6 +150,7 @@ def maybe_update_conversation_title_from_prompt(prompt: str):
             return
         max_len = 40
         conv["title"] = trimmed[:max_len] + ("..." if len(trimmed) > max_len else "")
+        persist_active_conversation()
 
 
 def reset_conversation_state():
@@ -148,26 +162,77 @@ def reset_conversation_state():
     st.session_state.file_name = None
 
 
-def stash_conversations_for_user(email: str):
-    """Cache current conversations for a given user inside session_state."""
-    if not email:
-        return
-    st.session_state.conversation_cache[email] = {
-        "conversations": copy.deepcopy(st.session_state.get("conversations", [])),
-        "active_conv_id": st.session_state.get("active_conv_id"),
+def _normalize_message_item(message_item) -> tuple[str, str]:
+    if isinstance(message_item, dict):
+        return str(message_item.get("role", "")), str(message_item.get("content", ""))
+    if isinstance(message_item, (tuple, list)) and len(message_item) == 2:
+        return str(message_item[0]), str(message_item[1])
+    return "", ""
+
+
+def _conversation_payload(conv: dict) -> dict:
+    messages = []
+    for item in conv.get("messages", []):
+        role, content = _normalize_message_item(item)
+        if not role:
+            continue
+        messages.append({"role": role, "content": content})
+    return {
+        "title": conv.get("title") or "New chat",
+        "file_id": conv.get("file_id"),
+        "file_name": conv.get("file_name"),
+        "messages": messages,
     }
 
 
-def restore_conversations_for_user(email: str) -> bool:
-    """Restore cached conversations if available. Returns True on success."""
-    if not email:
-        return False
-    cache = st.session_state.conversation_cache.get(email)
-    if not cache:
+def persist_active_conversation():
+    """Persist active conversation to backend, including full message list."""
+    conv = get_active_conversation()
+    if not conv or not st.session_state.get("user"):
+        return
+
+    conv["messages"] = st.session_state.get("messages", conv.get("messages", []))
+    payload = _conversation_payload(conv)
+
+    try:
+        api_put(f"/chat/conversations/{conv['id']}", payload)
+    except Exception as e:
+        st.warning(f"Could not save chat history: {e}")
+
+
+def load_conversations_from_backend() -> bool:
+    """Load this user's persisted conversation history from backend."""
+    if not st.session_state.get("user"):
         return False
 
-    st.session_state.conversations = copy.deepcopy(cache.get("conversations", []))
-    st.session_state.active_conv_id = cache.get("active_conv_id")
+    try:
+        data = api_get("/chat/conversations")
+    except Exception as e:
+        st.warning(f"Could not load previous chats: {e}")
+        return False
+
+    fetched_conversations = []
+    for raw_conv in data.get("conversations", []):
+        raw_messages = raw_conv.get("messages", [])
+        conv_messages = []
+        for item in raw_messages:
+            role, content = _normalize_message_item(item)
+            if role:
+                conv_messages.append((role, content))
+        fetched_conversations.append(
+            {
+                "id": raw_conv.get("id"),
+                "title": raw_conv.get("title") or "New chat",
+                "file_id": raw_conv.get("file_id"),
+                "file_name": raw_conv.get("file_name"),
+                "messages": conv_messages,
+            }
+        )
+
+    st.session_state.conversations = fetched_conversations
+    st.session_state.active_conv_id = (
+        fetched_conversations[0]["id"] if fetched_conversations else None
+    )
 
     # Align top-level convenience fields with the active conversation
     active = get_active_conversation()

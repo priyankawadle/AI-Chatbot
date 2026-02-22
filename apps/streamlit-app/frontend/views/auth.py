@@ -5,9 +5,9 @@ import streamlit as st
 
 from frontend.api import api_post
 from frontend.state import (
+    load_conversations_from_backend,
     persist_auth_to_query_params,
     reset_conversation_state,
-    restore_conversations_for_user,
 )
 
 
@@ -32,8 +32,8 @@ def show_auth_page():
                 st.session_state.user = data["user"]
                 st.session_state.tokens = data.get("tokens")
                 persist_auth_to_query_params()
-                # Restore prior conversations for this user if cached; otherwise start fresh
-                if not restore_conversations_for_user(st.session_state.user["email"]):
+                # Restore persisted conversations for this user if available.
+                if not load_conversations_from_backend():
                     reset_conversation_state()
                 st.toast("Login successful", icon="\U00002705")
                 st.rerun()

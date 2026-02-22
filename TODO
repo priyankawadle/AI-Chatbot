@@ -8,8 +8,8 @@ Based on your current app (auth + roles, admin upload, RAG chat across all docs,
 2. **Document filter in chat (All docs / selected docs)**
 - Add a multi-select in chat so users can query specific files instead of always searching all uploads.
 - This will improve answer precision and reduce noisy retrieval in large document sets.
-<!-- not urgent -->
-3. **Server-side conversation history**
+
+3. **Server-side conversation history** --> DONE
 - Persist chats in DB per user (instead of session-only cache), with restore across browser/device.
 - Add rename/delete/export for conversations for better long-term usability.
 

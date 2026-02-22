@@ -11,13 +11,81 @@ from app.config import (
     QDRANT_COLLECTION_NAME,
     TOP_K,
 )
-from app.models.schemas import ChatCitation, ChatRequest, ChatResponse, RetrievalSummary
+from app.models.schemas import (
+    ChatCitation,
+    ChatConversationCreateRequest,
+    ChatConversationListResponse,
+    ChatConversationOut,
+    ChatConversationUpsertRequest,
+    ChatRequest,
+    ChatResponse,
+    RetrievalSummary,
+)
 from app.services.embeddings import embed_texts, openai_client
 from app.services.security import get_current_user
 from app.services.vector_store import qdrant_client
 from app.db.database import db_cursor, get_db_conn
+from app.db.chat_repository import (
+    create_conversation,
+    get_conversations_for_user,
+    upsert_conversation_state,
+)
 
 router = APIRouter(tags=["chat"])
+
+
+@router.get("/chat/conversations", response_model=ChatConversationListResponse)
+async def list_chat_conversations(
+    conn=Depends(get_db_conn),
+    current_user: dict = Depends(get_current_user),
+):
+    user_id = int(current_user["user_id"])
+    items = get_conversations_for_user(conn, user_id=user_id)
+    return ChatConversationListResponse(
+        conversations=[ChatConversationOut(**item) for item in items]
+    )
+
+
+@router.post("/chat/conversations", response_model=ChatConversationOut, status_code=status.HTTP_201_CREATED)
+async def create_chat_conversation(
+    payload: ChatConversationCreateRequest,
+    conn=Depends(get_db_conn),
+    current_user: dict = Depends(get_current_user),
+):
+    user_id = int(current_user["user_id"])
+    item = create_conversation(
+        conn,
+        user_id=user_id,
+        title=(payload.title or "New chat").strip() or "New chat",
+        file_id=payload.file_id,
+        file_name=payload.file_name,
+    )
+    return ChatConversationOut(**item)
+
+
+@router.put("/chat/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def save_chat_conversation(
+    conversation_id: int,
+    payload: ChatConversationUpsertRequest,
+    conn=Depends(get_db_conn),
+    current_user: dict = Depends(get_current_user),
+):
+    user_id = int(current_user["user_id"])
+    try:
+        upsert_conversation_state(
+            conn,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            title=(payload.title or "New chat").strip() or "New chat",
+            file_id=payload.file_id,
+            file_name=payload.file_name,
+            messages=[{"role": msg.role, "content": msg.content} for msg in payload.messages],
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found for this user.",
+        )
 
 
 def _build_retrieval_summary(

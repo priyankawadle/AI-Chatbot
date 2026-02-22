@@ -7,7 +7,6 @@ from frontend.state import (
     get_active_conversation,
     clear_auth_query_params,
     hydrate_auth_from_query_params,
-    stash_conversations_for_user,
 )
 from frontend.views.auth import show_auth_page
 from frontend.views.chat import render_chat_step, render_upload_step
@@ -69,8 +68,6 @@ with top_col2:
     )
 
     if st.button("Logout", key="logout_btn", use_container_width=True):
-        # Save this user's conversations in the session cache so a later login can restore them
-        stash_conversations_for_user(email)
         # Clear all state on logout
         st.session_state.user = None
         st.session_state.tokens = None

@@ -35,3 +35,27 @@ CREATE TABLE IF NOT EXISTS file_chunks (
     page_number INT,
     content     TEXT NOT NULL
 );
+
+-- per-user chat conversations
+CREATE TABLE IF NOT EXISTS chat_conversations (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL DEFAULT 'New chat',
+    file_id     BIGINT,
+    file_name   TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_chat_conversations_user_id
+    ON chat_conversations(user_id, updated_at DESC);
+
+-- ordered messages belonging to a conversation
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id               BIGSERIAL PRIMARY KEY,
+    conversation_id  BIGINT NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+    role             TEXT NOT NULL,
+    content          TEXT NOT NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation_id
+    ON chat_messages(conversation_id, id ASC);

@@ -37,6 +37,21 @@ def api_post(path: str, payload: dict):
         return r.json()
 
 
+def api_put(path: str, payload: dict):
+    """
+    Simple JSON PUT helper.
+    Returns parsed JSON when present, otherwise None for 204 responses.
+    """
+    url = f"{API_BASE}{path}"
+    headers = _get_auth_header()
+    with httpx.Client(timeout=30.0) as client:
+        r = client.put(url, json=payload, headers=headers)
+        r.raise_for_status()
+        if not r.content:
+            return None
+        return r.json()
+
+
 def api_upload_file(path: str, file):
     """
     Multipart file upload helper for /files/upload.

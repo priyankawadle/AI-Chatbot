@@ -9,6 +9,7 @@ from frontend.state import (
     fetch_upload_history,
     get_active_conversation,
     maybe_update_conversation_title_from_prompt,
+    persist_active_conversation,
     update_active_conversation_metadata,
 )
 
@@ -172,6 +173,7 @@ def render_chat_step():
         active_conv = get_active_conversation()
         if active_conv:
             active_conv["messages"] = st.session_state.messages  # keep reference in sync
+        persist_active_conversation()
 
         with chat_container:
             with st.chat_message("user"):
@@ -209,6 +211,7 @@ def render_chat_step():
         st.session_state.messages.append(("assistant", bot_reply))
         if active_conv:
             active_conv["messages"] = st.session_state.messages
+        persist_active_conversation()
 
         with chat_container:
             with st.chat_message("assistant"):

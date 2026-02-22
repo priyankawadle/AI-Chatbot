@@ -84,3 +84,33 @@ class ChatResponse(BaseModel):
     reply: str
     citations: List[ChatCitation] = Field(default_factory=list)
     retrieval: RetrievalSummary = Field(default_factory=RetrievalSummary)
+
+
+class ChatMessageItem(BaseModel):
+    role: str
+    content: str
+
+
+class ChatConversationCreateRequest(BaseModel):
+    title: str = "New chat"
+    file_id: Optional[int] = None
+    file_name: Optional[str] = None
+
+
+class ChatConversationUpsertRequest(BaseModel):
+    title: str = "New chat"
+    file_id: Optional[int] = None
+    file_name: Optional[str] = None
+    messages: List[ChatMessageItem] = Field(default_factory=list)
+
+
+class ChatConversationOut(BaseModel):
+    id: int
+    title: str
+    file_id: Optional[int] = None
+    file_name: Optional[str] = None
+    messages: List[ChatMessageItem] = Field(default_factory=list)
+
+
+class ChatConversationListResponse(BaseModel):
+    conversations: List[ChatConversationOut] = Field(default_factory=list)
