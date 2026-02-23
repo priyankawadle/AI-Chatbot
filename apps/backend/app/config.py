@@ -14,6 +14,14 @@ backend_dir = Path(__file__).parent.parent  # apps/backend/
 env_file = backend_dir / ".env"
 load_dotenv(env_file)
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 # PostgreSQL connection settings (loaded from .env)
 #TODO: after removing static text like localhost etc , getting error check later
 DB_HOST = os.getenv("DB_HOST", "localhost")
@@ -38,6 +46,11 @@ CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-nano")
 TOP_K = 5
 MIN_SCORE_ANSWER = float(os.getenv("MIN_SCORE_ANSWER", "0.35"))
 LOW_CONFIDENCE_SCORE = float(os.getenv("LOW_CONFIDENCE_SCORE", "0.50"))
+RERANK_ENABLED = _env_bool("RERANK_ENABLED", True)
+RERANK_MODEL = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "20"))
+RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", str(TOP_K)))
+RERANK_TIMEOUT_MS = int(os.getenv("RERANK_TIMEOUT_MS", "5000"))
 # Backward-compatible alias for existing code paths that still import MIN_SCORE.
 MIN_SCORE = MIN_SCORE_ANSWER
 MAX_CHARS_PER_CHUNK = 1000

@@ -65,6 +65,9 @@ class RetrievalSummary(BaseModel):
     low_confidence: bool = False
     confidence_label: str = "low"
     reason: Optional[str] = None
+    reranker_used: bool = False
+    reranker_model: Optional[str] = None
+    reranker_candidates: int = 0
 
 
 class ChatResponse(BaseModel):

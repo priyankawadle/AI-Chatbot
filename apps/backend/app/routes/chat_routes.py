@@ -9,6 +9,9 @@ from app.config import (
     LOW_CONFIDENCE_SCORE,
     MIN_SCORE_ANSWER,
     QDRANT_COLLECTION_NAME,
+    RERANK_CANDIDATES,
+    RERANK_MODEL,
+    RERANK_TOP_K,
     TOP_K,
 )
 from app.models.schemas import (
@@ -23,6 +26,7 @@ from app.models.schemas import (
 )
 from app.services.embeddings import embed_texts, openai_client
 from app.services.retrieval import bm25_search_chunks, fuse_and_rerank_hits
+from app.services.reranker import rerank_hybrid_hits
 from app.services.security import get_current_user
 from app.services.vector_store import qdrant_client
 from app.db.database import db_cursor, get_db_conn
@@ -195,7 +199,7 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
             ]
         )
 
-    candidate_limit = max(TOP_K * 3, TOP_K)
+    candidate_limit = max(TOP_K * 3, RERANK_CANDIDATES, TOP_K)
 
     # 2a) Search Qdrant for semantic candidates
     try:
@@ -230,7 +234,14 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
     search_results = fuse_and_rerank_hits(
         vector_hits=vector_results,
         lexical_hits=lexical_results,
-        top_k=TOP_K,
+        top_k=candidate_limit,
+    )
+    pre_rerank_count = len(search_results)
+    search_results, reranker_used, reranker_skip_reason = rerank_hybrid_hits(
+        question=question,
+        hits=search_results,
+        top_k=max(1, RERANK_TOP_K),
+        max_candidates=candidate_limit,
     )
 
     # No chunks at all after hybrid retrieval
@@ -261,6 +272,17 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
             f"{len(lexical_results)} BM25 candidates."
         ),
     )
+    retrieval_summary.reranker_used = reranker_used
+    retrieval_summary.reranker_model = RERANK_MODEL if reranker_used else None
+    retrieval_summary.reranker_candidates = pre_rerank_count
+    if reranker_used:
+        retrieval_summary.reason = (
+            f"{retrieval_summary.reason} Cross-encoder reranker selected the final chunks."
+        )
+    elif reranker_skip_reason:
+        retrieval_summary.reason = (
+            f"{retrieval_summary.reason} Reranker skipped: {reranker_skip_reason}"
+        )
 
     # Check best score against threshold for relevance
     if retrieval_summary.top_score is None or retrieval_summary.top_score < MIN_SCORE_ANSWER:
