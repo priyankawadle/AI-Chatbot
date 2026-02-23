@@ -22,6 +22,7 @@ from app.models.schemas import (
     RetrievalSummary,
 )
 from app.services.embeddings import embed_texts, openai_client
+from app.services.retrieval import bm25_search_chunks, fuse_and_rerank_hits
 from app.services.security import get_current_user
 from app.services.vector_store import qdrant_client
 from app.db.database import db_cursor, get_db_conn
@@ -194,22 +195,45 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
             ]
         )
 
-    # 2) Search Qdrant for most similar chunks
+    candidate_limit = max(TOP_K * 3, TOP_K)
+
+    # 2a) Search Qdrant for semantic candidates
     try:
         response = qdrant_client.query_points(
             collection_name=QDRANT_COLLECTION_NAME,
             query=question_embedding,
-            limit=TOP_K,
+            limit=candidate_limit,
             query_filter=query_filter,
         )
-        search_results = response.points
+        vector_results = response.points
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Vector search failed: {exc}",
         )
 
-    # No chunks at all
+    # 2b) Search PostgreSQL chunks with BM25 for lexical candidates
+    try:
+        lexical_results = bm25_search_chunks(
+            conn,
+            question=question,
+            file_id=file_id,
+            limit=candidate_limit,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"BM25 search failed: {exc}",
+        )
+
+    # 2c) Merge and rerank hybrid candidates
+    search_results = fuse_and_rerank_hits(
+        vector_hits=vector_results,
+        lexical_hits=lexical_results,
+        top_k=TOP_K,
+    )
+
+    # No chunks at all after hybrid retrieval
     if not search_results:
         return ChatResponse(
             reply=(
@@ -225,19 +249,17 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
 
     touched_file_ids: set[int] = set()
     for hit in search_results:
-        hit_payload = hit.payload or {}
-        value = hit_payload.get("file_id")
-        try:
-            if value is not None:
-                touched_file_ids.add(int(value))
-        except (TypeError, ValueError):
-            continue
+        touched_file_ids.add(hit.file_id)
     _touch_file_usage_stats(conn, touched_file_ids)
 
     scores = [float(hit.score) for hit in search_results if hit.score is not None]
     retrieval_summary = _build_retrieval_summary(
         scores=scores,
         total_hits=len(search_results),
+        reason=(
+            f"Hybrid retrieval used {len(vector_results)} semantic candidates and "
+            f"{len(lexical_results)} BM25 candidates."
+        ),
     )
 
     # Check best score against threshold for relevance
@@ -256,24 +278,17 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
     citations: List[ChatCitation] = []
     seen_citations: Set[Tuple[int, int]] = set()
     for hit in search_results:
-        hit_payload = hit.payload or {}
-        text = hit_payload.get("text", "")
-        file_id = hit_payload.get("file_id")
-        page_number = hit_payload.get("page_number")
-        filename = hit_payload.get("filename")
+        text = hit.text
+        chunk_file_id = hit.file_id
+        page_number = hit.page_number
+        filename = hit.filename
 
         if text:
             page_label = page_number if page_number is not None else "Unknown"
             context_snippets.append(f"[File: {filename or 'Unknown'}, Page {page_label}] {text}")
 
-        if file_id is None:
-            continue
-
-        try:
-            file_id_int = int(file_id)
-            page_number_int = int(page_number) if page_number is not None else -1
-        except (TypeError, ValueError):
-            continue
+        file_id_int = int(chunk_file_id)
+        page_number_int = int(page_number) if page_number is not None else -1
 
         citation_key = (file_id_int, page_number_int)
         if citation_key in seen_citations:

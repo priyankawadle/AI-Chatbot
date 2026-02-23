@@ -21,7 +21,7 @@ Based on your current app (auth + roles, admin upload, RAG chat across all docs,
 - Add file delete/view stats (chunks, upload date, usage count, last queried).
 - Right now uploads are list-only; lifecycle management becomes important as your corpus grows.
 
-5. **Hybrid retrieval (semantic + keyword/BM25)**
+5. **Hybrid retrieval (semantic + keyword/BM25)**-->DONE
 - Combine vector search with keyword search and rerank merged results.
 - Improves recall for exact terms (IDs, policy names, numbers) that embeddings can miss.
 
