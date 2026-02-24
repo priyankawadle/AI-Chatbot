@@ -26,10 +26,20 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup_event() -> None:
-    """Create a small connection pool on startup and ensure schema exists."""
-    init_pool()
-    ensure_qdrant_collection()
-    print("DB pool initialized and Qdrant collection ensured.")
+    """Initialize dependencies without blocking process boot."""
+    try:
+        init_pool()
+        print("DB pool initialized.")
+    except Exception as e:
+        # Keep API process alive so platform port checks can pass.
+        print(f"DB init failed at startup: {e}")
+
+    try:
+        ensure_qdrant_collection()
+        print("Qdrant collection ensured.")
+    except Exception as e:
+        # Keep API process alive; retrieval endpoints can surface runtime errors.
+        print(f"Qdrant init failed at startup: {e}")
 
 
 @app.on_event("shutdown")

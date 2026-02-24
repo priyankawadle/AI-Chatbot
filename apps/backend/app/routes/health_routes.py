@@ -6,15 +6,15 @@ monitoring tools can verify both the API process and its database connection
 are alive.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from app.db.database import db_cursor, get_db_conn
+from app.db.database import db_cursor, pool
 
 router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-def health(db=Depends(get_db_conn)):
+def health():
     """
     Lightweight liveness + readiness probe.
 
@@ -24,11 +24,16 @@ def health(db=Depends(get_db_conn)):
       - db_version: PostgreSQL server version string (e.g. "PostgreSQL 16.2 ...").
     """
     try:
-        with db_cursor(db) as cur:
-            # SELECT version() returns the full PostgreSQL version string
-            cur.execute("SELECT version();")
-            version_row = cur.fetchone()
-            version = version_row[0] if version_row else "unknown"
+        if pool is None:
+            return {"status": "degraded", "db": "down", "error": "Database pool is not initialized"}
+
+        # Probe DB through the existing pool.
+        with pool.connection() as db:
+            with db_cursor(db) as cur:
+                # SELECT version() returns the full PostgreSQL version string
+                cur.execute("SELECT version();")
+                version_row = cur.fetchone()
+                version = version_row[0] if version_row else "unknown"
 
         return {"status": "ok", "db": "up", "db_version": version}
 

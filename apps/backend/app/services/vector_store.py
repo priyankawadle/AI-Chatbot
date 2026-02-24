@@ -20,7 +20,11 @@ from app.config import (
 _qdrant_url = QDRANT_URL 
 
 # Shared Qdrant client – created once at import time and reused across requests
-qdrant_client = QdrantClient(url=_qdrant_url, api_key=QDRANT_API_KEY or None)
+qdrant_client = QdrantClient(
+    url=_qdrant_url,
+    api_key=QDRANT_API_KEY or None,
+    timeout=5.0,
+)
 
 
 def ensure_qdrant_collection() -> None:
