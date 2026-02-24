@@ -59,7 +59,9 @@ CREATE TABLE IF NOT EXISTS file_chunks (
     file_id     BIGINT    NOT NULL REFERENCES uploaded_files(id) ON DELETE CASCADE,
     chunk_index INT       NOT NULL,
     page_number INT,
-    content     TEXT      NOT NULL
+    content     TEXT      NOT NULL,
+    chunk_type  TEXT,
+    section_title TEXT
 );
 
 CREATE TABLE IF NOT EXISTS chat_conversations (
@@ -117,6 +119,8 @@ def ensure_tables(conn) -> None:
         )
         # Backfill: add page_number on older DBs where file_chunks predate page citations.
         cur.execute("ALTER TABLE file_chunks ADD COLUMN IF NOT EXISTS page_number INT;")
+        cur.execute("ALTER TABLE file_chunks ADD COLUMN IF NOT EXISTS chunk_type TEXT;")
+        cur.execute("ALTER TABLE file_chunks ADD COLUMN IF NOT EXISTS section_title TEXT;")
         # Backfill: file upload dedupe + lifecycle stats.
         cur.execute("ALTER TABLE uploaded_files ADD COLUMN IF NOT EXISTS file_hash TEXT;")
         cur.execute(

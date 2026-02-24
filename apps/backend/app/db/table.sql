@@ -36,7 +36,9 @@ CREATE TABLE IF NOT EXISTS file_chunks (
     file_id     BIGINT NOT NULL REFERENCES uploaded_files(id) ON DELETE CASCADE,
     chunk_index INT NOT NULL,
     page_number INT,
-    content     TEXT NOT NULL
+    content     TEXT NOT NULL,
+    chunk_type  TEXT,
+    section_title TEXT
 );
 
 -- per-user chat conversations

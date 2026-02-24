@@ -23,7 +23,7 @@ from app.config import (
     QDRANT_COLLECTION_NAME,
 )
 from app.db.database import db_cursor, get_db_conn
-from app.services.chunking import chunk_text
+from app.services.chunking import chunk_text_structured
 from app.services.embeddings import embed_texts
 from app.services.pdf_processing import extract_text_pages_from_pdf
 from app.services.security import get_current_user, require_admin
@@ -55,11 +55,11 @@ def _upsert_file_points_to_qdrant(
     *,
     file_id: int,
     filename: str,
-    chunk_rows: list[tuple[int, int | None, str]],
+    chunk_rows: list[tuple[int, int | None, str, str | None, str | None]],
     embeddings: list[list[float]],
 ) -> None:
     points: list[qmodels.PointStruct] = []
-    for (chunk_index, page_number, chunk_text), vector in zip(chunk_rows, embeddings):
+    for (chunk_index, page_number, chunk_text, chunk_type, section_title), vector in zip(chunk_rows, embeddings):
         point_id = file_id * MAX_CHUNKS_PER_FILE + int(chunk_index)
         points.append(
             qmodels.PointStruct(
@@ -71,6 +71,8 @@ def _upsert_file_points_to_qdrant(
                     "page_number": page_number,
                     "filename": filename,
                     "text": chunk_text,
+                    "chunk_type": chunk_type,
+                    "section_title": section_title,
                 },
             )
         )
@@ -157,13 +159,33 @@ async def upload_file(
         chunk_records = []
         if filename_lower.endswith(".txt"):
             text_content = raw_bytes.decode("utf-8", errors="ignore").strip()
-            for chunk in chunk_text(text_content):
-                chunk_records.append({"text": chunk, "page_number": 1})
+            structured_chunks, _ = chunk_text_structured(text_content)
+            for chunk in structured_chunks:
+                chunk_records.append(
+                    {
+                        "text": chunk.text,
+                        "page_number": 1,
+                        "chunk_type": chunk.chunk_type,
+                        "section_title": chunk.section_title,
+                    }
+                )
         else:  # .pdf
             text_pages = extract_text_pages_from_pdf(raw_bytes)
+            current_section = None
             for page_number, page_text in text_pages:
-                for chunk in chunk_text(page_text):
-                    chunk_records.append({"text": chunk, "page_number": page_number})
+                structured_chunks, current_section = chunk_text_structured(
+                    page_text,
+                    current_section=current_section,
+                )
+                for chunk in structured_chunks:
+                    chunk_records.append(
+                        {
+                            "text": chunk.text,
+                            "page_number": page_number,
+                            "chunk_type": chunk.chunk_type,
+                            "section_title": chunk.section_title,
+                        }
+                    )
 
         if not chunk_records:
             raise HTTPException(
@@ -210,10 +232,24 @@ async def upload_file(
                 for idx, record in enumerate(chunk_records):
                     cur.execute(
                         """
-                        INSERT INTO file_chunks (file_id, chunk_index, page_number, content)
-                        VALUES (%s, %s, %s, %s);
+                        INSERT INTO file_chunks (
+                            file_id,
+                            chunk_index,
+                            page_number,
+                            content,
+                            chunk_type,
+                            section_title
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s);
                         """,
-                        (file_id, idx, record["page_number"], record["text"]),
+                        (
+                            file_id,
+                            idx,
+                            record["page_number"],
+                            record["text"],
+                            record["chunk_type"],
+                            record["section_title"],
+                        ),
                     )
 
             conn.commit()
@@ -247,6 +283,8 @@ async def upload_file(
                         "page_number": record["page_number"],
                         "filename": file.filename,
                         "text": record["text"],
+                        "chunk_type": record["chunk_type"],
+                        "section_title": record["section_title"],
                     },
                 )
             )
@@ -412,7 +450,7 @@ async def reindex_uploaded_file(
 
             cur.execute(
                 """
-                SELECT chunk_index, page_number, content
+                SELECT chunk_index, page_number, content, chunk_type, section_title
                 FROM file_chunks
                 WHERE file_id = %s
                 ORDER BY chunk_index ASC;
@@ -486,7 +524,7 @@ async def get_chunk_content(
         with db_cursor(conn) as cur:
             cur.execute(
                 """
-                SELECT f.filename, c.page_number, c.content
+                SELECT f.filename, c.page_number, c.content, c.chunk_type, c.section_title
                 FROM file_chunks c
                 JOIN uploaded_files f ON f.id = c.file_id
                 WHERE c.file_id = %s AND c.chunk_index = %s
@@ -513,4 +551,6 @@ async def get_chunk_content(
         "page_number": row[1],
         "chunk_index": chunk_index,
         "content": row[2],
+        "chunk_type": row[3],
+        "section_title": row[4],
     }
