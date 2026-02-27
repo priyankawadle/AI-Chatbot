@@ -47,22 +47,7 @@ def _format_grouped_citations(citations: list[ChatCitation]) -> str:
 
 
 def _format_retrieval_summary(retrieval: RetrievalSummary) -> str:
-    def _fmt_score(value: float | None) -> str:
-        return f"{value:.3f}" if value is not None else "N/A"
-
-    reranker_text = (
-        f"reranker=on ({retrieval.reranker_model})"
-        if retrieval.reranker_used
-        else "reranker=off"
-    )
-
-    return (
-        f"top={_fmt_score(retrieval.top_score)} | "
-        f"avg={_fmt_score(retrieval.avg_score)} | "
-        f"chunks used={retrieval.chunks_used}/{retrieval.total_hits} | "
-        f"confidence={retrieval.confidence_label} | "
-        f"{reranker_text}"
-    )
+    return f"confidence={retrieval.confidence_label}"
 
 
 def render_upload_step(active_conv):

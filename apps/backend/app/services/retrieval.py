@@ -1,4 +1,4 @@
-"""Hybrid retrieval helpers: vector + BM25 lexical search with reranking."""
+"""Hybrid retrieval helpers: vector + BM25 lexical search with score fusion."""
 from __future__ import annotations
 
 import re
@@ -141,14 +141,39 @@ def _normalize_scores(values: Iterable[float]) -> Dict[float, float]:
     return {v: (v - min_v) / (max_v - min_v) for v in values_list}
 
 
-def fuse_and_rerank_hits(
+def _extract_what_is_target(question: str | None) -> str | None:
+    if not question:
+        return None
+    m = re.match(r"^\s*what\s+is\s+(.+?)\s*\??\s*$", question.strip(), flags=re.IGNORECASE)
+    if not m:
+        return None
+    target = m.group(1).strip().strip('"').strip("'")
+    return target.lower() if target else None
+
+
+def _definition_boost(text: str, target: str | None) -> float:
+    if not target:
+        return 0.0
+    body = (text or "").lower()
+    boost = 0.0
+    if f"what is {target}" in body:
+        boost += 0.20
+    if re.search(rf"\b{re.escape(target)}\b\s+(is|are|refers to|means|returns)\b", body):
+        boost += 0.20
+    if target in body:
+        boost += 0.05
+    return boost
+
+
+def fuse_and_rank_hits(
     *,
     vector_hits: List[Any],
     lexical_hits: List[LexicalHit],
     top_k: int,
+    question: str | None = None,
 ) -> List[HybridHit]:
     """
-    Merge vector and lexical candidates, then rerank using blended score.
+    Merge vector and lexical candidates, then rank using a blended score.
 
     Final score blend:
       - normalized vector score
@@ -219,11 +244,27 @@ def fuse_and_rerank_hits(
                 bm25_score=lex_score,
             )
 
-    reranked = list(merged.values())
-    for item in reranked:
+    ranked_hits = list(merged.values())
+    question_tokens = set(_tokenize(question or ""))
+    target = _extract_what_is_target(question)
+
+    for item in ranked_hits:
+        doc_tokens = set(_tokenize(item.text))
+        overlap = (
+            float(len(question_tokens.intersection(doc_tokens))) / float(len(question_tokens))
+            if question_tokens
+            else 0.0
+        )
+        def_boost = _definition_boost(item.text, target)
+
         # Keep score in [0, 1] so existing thresholds remain meaningful.
-        final = (0.60 * item.vector_score) + (0.40 * item.bm25_score)
+        final = (
+            (0.50 * item.vector_score)
+            + (0.30 * item.bm25_score)
+            + (0.15 * overlap)
+            + def_boost
+        )
         item.score = max(0.0, min(final, 1.0))
 
-    reranked.sort(key=lambda hit: hit.score, reverse=True)
-    return reranked[:top_k]
+    ranked_hits.sort(key=lambda hit: hit.score, reverse=True)
+    return ranked_hits[:top_k]

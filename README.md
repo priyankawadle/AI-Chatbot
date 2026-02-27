@@ -18,7 +18,6 @@ An AI document assistant that lets users upload `.txt`/`.pdf` files and ask ques
 - Hybrid retrieval:
  1. semantic search in Qdrant.
  2. lexical BM25 search in PostgreSQL.
-- Optional reranking with a cross-encoder model.
 - Inline citations with `page` + `filename + confidence`
 - Duplicate upload protection using SHA-256 file hash (prevents re-uploading same document).
 - Multi-file query support when file_id is not provided in /chat (searches across available files).
@@ -72,11 +71,6 @@ Copy-Items from apps\streamlit-app\.env.example into apps\streamlit-app\.env
 - `EMBEDDING_MODEL`: embedding model (example: `text-embedding-3-small`)
 - `MIN_SCORE_ANSWER`: minimum score threshold for answer confidence
 - `LOW_CONFIDENCE_SCORE`: threshold for low-confidence warning
-- `RERANK_ENABLED`: `true/false`
-- `RERANK_MODEL`: sentence-transformers cross-encoder
-- `RERANK_CANDIDATES`: max candidates sent to reranker
-- `RERANK_TOP_K`: final chunks after reranking
-- `RERANK_TIMEOUT_MS`: reranker timeout
 - `ALLOWED_ORIGINS`: comma-separated CORS origins (or `*`)
 - `JWT_SECRET`: signing secret for tokens
 - `JWT_ALGO`: JWT algorithm (`HS256`)
@@ -258,10 +252,7 @@ Response:
     "total_hits": 15,
     "low_confidence": false,
     "confidence_label": "high",
-    "reason": "Hybrid retrieval used semantic and BM25 candidates.",
-    "reranker_used": true,
-    "reranker_model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
-    "reranker_candidates": 15
+    "reason": "Hybrid retrieval used semantic and BM25 candidates."
   }
 }
 ```
@@ -316,4 +307,3 @@ Use one Web Service with the existing Docker image pattern (backend + Streamlit 
 8. Validate:
 - `/health` returns status JSON
 - UI loads and can login/upload/chat
-

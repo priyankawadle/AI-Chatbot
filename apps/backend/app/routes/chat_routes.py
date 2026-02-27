@@ -1,4 +1,5 @@
 """Routes that handle chat over uploaded documents."""
+import re
 from typing import List, Set, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -9,9 +10,6 @@ from app.config import (
     LOW_CONFIDENCE_SCORE,
     MIN_SCORE_ANSWER,
     QDRANT_COLLECTION_NAME,
-    RERANK_CANDIDATES,
-    RERANK_MODEL,
-    RERANK_TOP_K,
     TOP_K,
 )
 from app.models.schemas import (
@@ -25,8 +23,7 @@ from app.models.schemas import (
     RetrievalSummary,
 )
 from app.services.embeddings import embed_texts, openai_client
-from app.services.retrieval import bm25_search_chunks, fuse_and_rerank_hits
-from app.services.reranker import rerank_hybrid_hits
+from app.services.retrieval import bm25_search_chunks, fuse_and_rank_hits
 from app.services.security import get_current_user
 from app.services.vector_store import qdrant_client
 from app.db.database import db_cursor, get_db_conn
@@ -37,6 +34,94 @@ from app.db.chat_repository import (
 )
 
 router = APIRouter(tags=["chat"])
+
+
+def _extract_what_is_target(question: str) -> str | None:
+    m = re.match(r"^\s*what\s+is\s+(.+?)\s*\??\s*$", question.strip(), flags=re.IGNORECASE)
+    if not m:
+        return None
+    target = m.group(1).strip().strip('"').strip("'")
+    return target if target else None
+
+
+def _extract_definition_from_context(question: str, context_snippets: List[str]) -> str | None:
+    target = _extract_what_is_target(question)
+    if not target:
+        return None
+
+    target_l = target.lower()
+    definition_patterns = [
+        re.compile(rf"\b{re.escape(target_l)}\b\s+(is|are|refers to|means|returns)\b.+?[\.!?]", re.IGNORECASE),
+        re.compile(rf"\bwhat\s+is\s+{re.escape(target_l)}\b.+?[\.!?]", re.IGNORECASE),
+    ]
+
+    for snippet in context_snippets:
+        text = snippet.strip()
+        text_l = text.lower()
+        if target_l not in text_l:
+            continue
+        for pattern in definition_patterns:
+            m = pattern.search(text_l)
+            if not m:
+                continue
+            start, end = m.span()
+            # Return text from original snippet preserving casing.
+            return text[start:end].strip()
+    return None
+
+
+def _tokenize_simple(text: str) -> List[str]:
+    return [t.lower() for t in re.findall(r"[A-Za-z0-9_\\-\\.]+", text or "")]
+
+
+def _extract_topic_from_question(question: str) -> str | None:
+    q = (question or "").strip()
+    if not q:
+        return None
+    patterns = [
+        r"^\s*what\s+is\s+(.+?)\s*\??\s*$",
+        r"^\s*explain\s+me\s+(.+?)\s*\??\s*$",
+        r"^\s*explain\s+(.+?)\s*\??\s*$",
+        r"^\s*describe\s+(.+?)\s*\??\s*$",
+        r"^\s*tell\s+me\s+about\s+(.+?)\s*\??\s*$",
+    ]
+    for pat in patterns:
+        m = re.match(pat, q, flags=re.IGNORECASE)
+        if m:
+            topic = m.group(1).strip().strip('"').strip("'")
+            if topic:
+                return topic
+    return None
+
+
+def _hit_focus_score(question: str, text: str) -> float:
+    q_tokens = set(_tokenize_simple(question))
+    d_tokens = set(_tokenize_simple(text))
+    overlap = (len(q_tokens.intersection(d_tokens)) / len(q_tokens)) if q_tokens else 0.0
+
+    topic = _extract_topic_from_question(question)
+    topic_l = topic.lower() if topic else None
+    body = (text or "").lower()
+    topic_boost = 0.0
+    if topic_l and topic_l in body:
+        topic_boost += 0.30
+    if topic_l and f"what is {topic_l}" in body:
+        topic_boost += 0.20
+    if topic_l and re.search(rf"\b{re.escape(topic_l)}\b\s+(is|are|includes|covers|reports|refers to|means)\b", body):
+        topic_boost += 0.20
+
+    return (0.50 * overlap) + topic_boost
+
+
+def _looks_like_refusal(answer: str) -> bool:
+    low = (answer or "").lower()
+    markers = [
+        "cannot find it in the document",
+        "does not provide specific information",
+        "not provided in the document",
+        "not enough information in the document",
+    ]
+    return any(m in low for m in markers)
 
 
 def _touch_file_usage_stats(conn, file_ids: set[int]) -> None:
@@ -199,7 +284,7 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
             ]
         )
 
-    candidate_limit = max(TOP_K * 3, RERANK_CANDIDATES, TOP_K)
+    candidate_limit = TOP_K * 3
 
     # 2a) Search Qdrant for semantic candidates
     try:
@@ -230,19 +315,14 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
             detail=f"BM25 search failed: {exc}",
         )
 
-    # 2c) Merge and rerank hybrid candidates
-    search_results = fuse_and_rerank_hits(
+    # 2c) Merge and rank hybrid candidates
+    search_results = fuse_and_rank_hits(
         vector_hits=vector_results,
         lexical_hits=lexical_results,
         top_k=candidate_limit,
-    )
-    pre_rerank_count = len(search_results)
-    search_results, reranker_used, reranker_skip_reason = rerank_hybrid_hits(
         question=question,
-        hits=search_results,
-        top_k=max(1, RERANK_TOP_K),
-        max_candidates=candidate_limit,
     )
+    search_results = search_results[:TOP_K]
 
     # No chunks at all after hybrid retrieval
     if not search_results:
@@ -272,18 +352,6 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
             f"{len(lexical_results)} BM25 candidates."
         ),
     )
-    retrieval_summary.reranker_used = reranker_used
-    retrieval_summary.reranker_model = RERANK_MODEL if reranker_used else None
-    retrieval_summary.reranker_candidates = pre_rerank_count
-    if reranker_used:
-        retrieval_summary.reason = (
-            f"{retrieval_summary.reason} Cross-encoder reranker selected the final chunks."
-        )
-    elif reranker_skip_reason:
-        retrieval_summary.reason = (
-            f"{retrieval_summary.reason} Reranker skipped: {reranker_skip_reason}"
-        )
-
     # Check best score against threshold for relevance
     if retrieval_summary.top_score is None or retrieval_summary.top_score < MIN_SCORE_ANSWER:
         return ChatResponse(
@@ -295,11 +363,17 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
             retrieval=retrieval_summary,
         )
 
-    # 3) Build context from top-k chunks
+    # 3) Build context from top-k chunks (focus chunks most aligned to the question)
+    focused_hits = sorted(
+        search_results,
+        key=lambda h: (_hit_focus_score(question, h.text), float(h.score or 0.0)),
+        reverse=True,
+    )
+
     context_snippets: List[str] = []
     citations: List[ChatCitation] = []
     seen_citations: Set[Tuple[int, int]] = set()
-    for hit in search_results:
+    for hit in focused_hits[:TOP_K]:
         text = hit.text
         chunk_file_id = hit.file_id
         page_number = hit.page_number
@@ -341,13 +415,14 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
 
     context_block = "\n\n".join(context_snippets)
 
-    # 4) Ask OpenAI to answer based ONLY on this context
-    #    The instructions explicitly tell it not to hallucinate beyond context.
+    # 4) Ask OpenAI to answer from this context only.
     try:
         prompt_for_model = (
             "You are an AI assistant that answers questions using ONLY the provided document context.\n"
-            "If the answer is not clearly contained in the context, say that you cannot find it "
-            "in the document. Do NOT invent facts.\n\n"
+            "If the context contains relevant information, provide a direct answer in simple language.\n"
+            "If the user asks to explain in detail, include all relevant details from the context.\n"
+            "Only say you cannot find it in the document when the context is genuinely unrelated.\n"
+            "Do NOT invent facts.\n\n"
             f"Document context:\n{context_block}\n\n"
             f"User question: {question}\n\n"
             "Answer:"
@@ -381,5 +456,36 @@ async def chat_endpoint(payload: ChatRequest, conn=Depends(get_db_conn), current
             "I tried to answer from the document, but couldn't generate a useful response. "
             "Please try rephrasing your question."
         )
+    else:
+        lower_answer = answer.lower()
+        if _looks_like_refusal(answer):
+            extracted = _extract_definition_from_context(question, context_snippets)
+            if extracted:
+                answer = extracted
+            elif retrieval_summary.confidence_label in {"medium", "high"}:
+                retry_prompt = (
+                    "Answer using only this context. Do not refuse if relevant facts exist.\n"
+                    "Return a concise factual answer and include key details explicitly present.\n\n"
+                    f"Document context:\n{context_block}\n\n"
+                    f"User question: {question}\n\n"
+                    "Answer:"
+                )
+                retry = openai_client.chat.completions.create(
+                    model=CHAT_MODEL,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a careful assistant that extracts facts from provided context.",
+                        },
+                        {
+                            "role": "user",
+                            "content": retry_prompt,
+                        },
+                    ],
+                    temperature=0.0,
+                )
+                retry_answer = (retry.choices[0].message.content or "").strip()
+                if retry_answer and not _looks_like_refusal(retry_answer):
+                    answer = retry_answer
 
     return ChatResponse(reply=answer, citations=citations, retrieval=retrieval_summary)
